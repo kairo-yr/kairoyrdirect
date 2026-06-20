@@ -1,34 +1,93 @@
 import { motion } from 'framer-motion';
 import {
   ArrowRight,
-  BarChart3,
-  CalendarCheck,
-  CheckCircle2,
-  ClipboardList,
-  CreditCard,
-  GraduationCap,
-  PlayCircle,
-  ShieldCheck,
-  UsersRound,
-} from 'lucide-react';
+	  BarChart3,
+	  BookOpen,
+	  CalendarCheck,
+	  CheckCircle2,
+	  ClipboardList,
+	  CreditCard,
+	  GraduationCap,
+	  LayoutDashboard,
+	  PlayCircle,
+	  School,
+	  Shield,
+	  ShieldCheck,
+	  UserRound,
+	  UsersRound,
+	} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { FeatureCard } from '../components/landing/FeatureCard';
 import { BrandMark } from '../components/ui/BrandMark';
 import { RoadmapBadge } from '../components/ui/RoadmapBadge';
 import { APP_NAME, APP_TAGLINE, PLAY_APP_NAME, SUPPORT_TEXT } from '../config/brand';
 import { features } from '../data/mockData';
+import { useAuth } from '../contexts/AuthContext';
+import { getDashboardPathByRole } from '../utils/roleRedirects';
 
-const featureIcons = [GraduationCap, ClipboardList, UsersRound, CalendarCheck, BarChart3, CreditCard, ShieldCheck, PlayCircle];
+const featureIcons = [
+  GraduationCap,
+  ClipboardList,
+  UsersRound,
+  CalendarCheck,
+  BarChart3,
+  CreditCard,
+  LayoutDashboard,
+  Shield,
+  UserRound,
+  School,
+  BookOpen,
+  ShieldCheck,
+  PlayCircle,
+];
 
 export function LandingPage() {
+  const { isAuthenticated, role, userProfile, logout } = useAuth();
+  const dashboardPath = role ? getDashboardPathByRole(role) : '/login';
+  const isActiveAssignedUser = Boolean(isAuthenticated && role && role !== 'unassigned' && userProfile?.status === 'active');
+  const registerPath = isAuthenticated ? '/onboarding' : '/login';
+
   return (
     <main className="bg-cream text-navy">
       <section className="mx-auto flex min-h-screen max-w-7xl flex-col px-5 py-6">
         <nav className="flex items-center justify-between">
           <BrandMark />
-          <Link className="rounded-full bg-white px-4 py-2 text-sm font-black text-navy shadow-card" to="/login">
-            Login
-          </Link>
+          <div className="flex items-center gap-2">
+            {isActiveAssignedUser ? (
+              <>
+                <Link className="rounded-full bg-white px-4 py-2 text-sm font-black text-navy shadow-card" to={dashboardPath}>
+                  Go to dashboard
+                </Link>
+                <button className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-600 shadow-card" onClick={logout} type="button">
+                  Logout
+                </button>
+              </>
+            ) : isAuthenticated ? (
+              <>
+                <Link className="rounded-full bg-white px-4 py-2 text-sm font-black text-navy shadow-card" to={registerPath}>
+                  Register Academy
+                </Link>
+                <Link className="rounded-full bg-white px-4 py-2 text-sm font-black text-navy shadow-card" to="/join">
+                  Join Academy
+                </Link>
+                <button className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-600 shadow-card" onClick={logout} type="button">
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link className="rounded-full bg-white px-4 py-2 text-sm font-black text-navy shadow-card" to="/login">
+                  Login
+                </Link>
+                <Link className="rounded-full bg-white px-4 py-2 text-sm font-black text-navy shadow-card" to={registerPath}>
+                  Register Academy
+                </Link>
+                <Link className="rounded-full bg-white px-4 py-2 text-sm font-black text-navy shadow-card" to="/join">
+                  Join Academy
+                </Link>
+              </>
+            )}
+          </div>
         </nav>
 
         <div className="grid flex-1 items-center gap-12 py-16 lg:grid-cols-2">
@@ -44,9 +103,25 @@ export function LandingPage() {
               parent updates, and future {PLAY_APP_NAME} access from one premium SaaS workspace.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link className="inline-flex items-center gap-2 rounded-full bg-directBlue px-5 py-3 text-sm font-black text-white shadow-soft" to="/dashboard">
-                View Dashboard <ArrowRight size={18} />
-              </Link>
+              {isActiveAssignedUser ? (
+                <Link className="inline-flex items-center gap-2 rounded-full bg-directBlue px-5 py-3 text-sm font-black text-white shadow-soft" to={dashboardPath}>
+                  Go to Dashboard <ArrowRight size={18} />
+                </Link>
+              ) : (
+                <>
+                  <Link className="inline-flex items-center gap-2 rounded-full bg-directBlue px-5 py-3 text-sm font-black text-white shadow-soft" to={registerPath}>
+                    Register Academy <ArrowRight size={18} />
+                  </Link>
+                  <Link className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-black text-navy shadow-card" to="/join">
+                    Join Academy
+                  </Link>
+                  {!isAuthenticated ? (
+                    <Link className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-black text-navy shadow-card" to="/login">
+                      Login
+                    </Link>
+                  ) : null}
+                </>
+              )}
               <a className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-black text-navy shadow-card" href="#features">
                 Explore Features
               </a>
@@ -162,8 +237,8 @@ export function LandingPage() {
       <section className="bg-navy px-5 py-20 text-center text-white">
         <RoadmapBadge status="Future Integration" />
         <h2 className="mx-auto mt-5 max-w-3xl text-4xl font-black tracking-tight">Prepare your academy for a smarter chess learning system.</h2>
-        <Link className="mt-8 inline-flex rounded-full bg-directGold px-6 py-3 text-sm font-black text-white" to="/dashboard">
-          Open Phase 1 Dashboard
+        <Link className="mt-8 inline-flex rounded-full bg-directGold px-6 py-3 text-sm font-black text-white" to={isActiveAssignedUser ? dashboardPath : registerPath}>
+          {isActiveAssignedUser ? 'Go to dashboard' : 'Register Academy'}
         </Link>
       </section>
     </main>
