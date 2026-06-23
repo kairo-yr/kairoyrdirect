@@ -53,7 +53,7 @@ export function AcademyCoachesPage() {
   }, [batches]);
 
   const loadCoaches = async () => {
-    if (!academyId || userProfile?.role !== 'academy_admin') {
+    if (!academyId || userProfile?.app_role !== 'academy_admin') {
       setLoading(false);
       return;
     }
@@ -71,7 +71,7 @@ export function AcademyCoachesPage() {
 
   useEffect(() => {
     void loadCoaches();
-  }, [academyId, userProfile?.role]);
+  }, [academyId, userProfile?.app_role]);
 
   const updateField = (field: keyof CoachForm, value: string) => setForm((current) => ({ ...current, [field]: value }));
 

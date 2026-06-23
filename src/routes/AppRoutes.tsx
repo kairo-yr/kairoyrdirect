@@ -41,6 +41,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/auth/callback" element={<DashboardRedirect />} />
       <Route path="/join" element={<JoinInviteLookup />} />
       <Route path="/join/:role/:inviteToken" element={<JoinInvitePage />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
@@ -79,8 +80,8 @@ export function AppRoutes() {
         <Route path="/student/fees" element={<ProtectedRoute allowedRoles={['student']}><StudentFeesPage /></ProtectedRoute>} />
         <Route path="/student/profile" element={<ProtectedRoute allowedRoles={['student']}><StudentProfileSettingsPage /></ProtectedRoute>} />
         <Route path="/student/homework" element={<ProtectedRoute allowedRoles={['student']}><HomeworkPage mode="student" /></ProtectedRoute>} />
-        <Route path="/onboarding" element={<ProtectedRoute allowedRoles={['unassigned']}><Onboarding /></ProtectedRoute>} />
-        <Route path="/pending-approval" element={<ProtectedRoute allowedRoles={['unassigned']} allowedStatuses={['pending']}><PendingApproval /></ProtectedRoute>} />
+        <Route path="/onboarding" element={<ProtectedRoute allowedRoles={['unassigned', 'user']}><Onboarding /></ProtectedRoute>} />
+        <Route path="/pending-approval" element={<ProtectedRoute allowedRoles={['unassigned', 'user']} allowedStatuses={['pending']}><PendingApproval /></ProtectedRoute>} />
         <Route path="/dashboard" element={<DashboardRedirect />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

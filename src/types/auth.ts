@@ -1,20 +1,31 @@
-import type { User } from 'firebase/auth';
+import type { User } from '@supabase/supabase-js';
 
-export type Role = 'super_admin' | 'academy_admin' | 'coach' | 'parent' | 'student' | 'unassigned';
+export type Role = 'super_admin' | 'academy_admin' | 'coach' | 'parent' | 'student' | 'unassigned' | 'user';
 
 export type UserStatus = 'active' | 'pending' | 'disabled';
-export type AcademyStatus = 'pending' | 'active' | 'rejected' | 'disabled';
+export type AcademyStatus = 'pending' | 'active' | 'rejected' | 'disabled' | 'archived';
 export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
 export type InvitableRole = 'coach' | 'student';
 
-export type FirebaseUser = User;
+export type AuthUser = User;
 
 export interface UserProfile {
+  id: string;
+  full_name: string;
+  avatar_url: string | null;
+  phone: string | null;
+  platform_role: string;
+  app_role: Role;
+  created_at: unknown;
+  updated_at: unknown;
+  // Legacy aliases kept until Firestore-backed academy data is migrated.
   uid: string;
   name: string;
   email: string;
   photoURL: string | null;
   role: Role;
+  platformRole: string;
+  appRole: string;
   status: UserStatus;
   academyId: string | null;
   linkedCoachId: string | null;

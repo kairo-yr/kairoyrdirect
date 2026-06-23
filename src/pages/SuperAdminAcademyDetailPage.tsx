@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { ArrowLeft, Ban, CheckCircle2, ClipboardList, GraduationCap, KeyRound, RotateCcw, ShieldCheck, Users, XCircle } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { StatCard } from '../components/ui/StatCard';
-import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
-import type { AcademyRegistration } from '../types/auth';
+import {
+  approveAcademy,
+  disableAcademy,
+  getAcademyById,
+  reactivateAcademy,
+  rejectAcademy,
+  type Academy,
+} from '../lib/academyApi';
 import { getAcademyStatusClass } from '../utils/academyStatus';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
-import { approveAcademy, disableAcademy, reactivateAcademy, rejectAcademy } from '../utils/superAdminActions';
 
 type AcademyCounts = {
   students: number;
@@ -22,8 +25,7 @@ type AcademyCounts = {
 
 export function SuperAdminAcademyDetailPage() {
   const { academyId } = useParams();
-  const { userProfile } = useAuth();
-  const [academy, setAcademy] = useState<AcademyRegistration | null>(null);
+  const [academy, setAcademy] = useState<Academy | null>(null);
   const [counts, setCounts] = useState<AcademyCounts>({ students: 0, coaches: 0, batches: 0, invites: 0 });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -36,27 +38,16 @@ export function SuperAdminAcademyDetailPage() {
     }
 
     setLoading(true);
-    const academySnapshot = await getDoc(doc(db, 'academies', academyId));
-    if (!academySnapshot.exists()) {
-      setAcademy(null);
+    setError('');
+    try {
+      const loadedAcademy = await getAcademyById(academyId);
+      setAcademy(loadedAcademy);
+      setCounts({ students: 0, coaches: 0, batches: 0, invites: 0 });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load academy.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const [studentsSnapshot, coachesSnapshot, batchesSnapshot, invitesSnapshot] = await Promise.all([
-      getDocs(collection(db, 'academies', academyId, 'students')),
-      getDocs(collection(db, 'academies', academyId, 'coaches')),
-      getDocs(collection(db, 'academies', academyId, 'batches')),
-      getDocs(query(collection(db, 'academyInvites'), where('academyId', '==', academyId))),
-    ]);
-    setAcademy({ id: academySnapshot.id, ...academySnapshot.data() } as AcademyRegistration);
-    setCounts({
-      students: studentsSnapshot.size,
-      coaches: coachesSnapshot.size,
-      batches: batchesSnapshot.size,
-      invites: invitesSnapshot.size,
-    });
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -76,10 +67,10 @@ export function SuperAdminAcademyDetailPage() {
   };
 
   const handleReject = async () => {
-    if (!academy || !userProfile) return;
+    if (!academy) return;
     const reason = window.prompt(`Reason for rejecting ${academy.name}?`);
     if (!reason?.trim()) return;
-    await runAction(() => rejectAcademy(academy.id, reason.trim(), userProfile), `${academy.name} rejected.`);
+    await runAction(() => rejectAcademy(academy.id, reason.trim()).then(() => undefined), `${academy.name} rejected.`);
   };
 
   if (loading) return <EmptyState title="Loading academy" description="Checking academy profile and counts." />;
@@ -97,10 +88,10 @@ export function SuperAdminAcademyDetailPage() {
       {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</div> : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <StatCard label="Students" value={String(counts.students)} helper="Academy student profiles" icon={GraduationCap} />
-        <StatCard label="Coaches" value={String(counts.coaches)} helper="Academy coach profiles" icon={Users} />
-        <StatCard label="Batches" value={String(counts.batches)} helper="Academy batch records" icon={ClipboardList} />
-        <StatCard label="Invites" value={String(counts.invites)} helper="Academy invite records" icon={KeyRound} />
+        <StatCard label="Students" value={String(counts.students)} helper="Next migration phase" icon={GraduationCap} />
+        <StatCard label="Coaches" value={String(counts.coaches)} helper="Next migration phase" icon={Users} />
+        <StatCard label="Batches" value={String(counts.batches)} helper="Next migration phase" icon={ClipboardList} />
+        <StatCard label="Invites" value={String(counts.invites)} helper="Next migration phase" icon={KeyRound} />
         <StatCard label="Status" value={academy.status} helper="Current academy state" icon={ShieldCheck} />
       </div>
 
@@ -116,14 +107,14 @@ export function SuperAdminAcademyDetailPage() {
           {[
             ['Academy name', academy.name],
             ['City', academy.city || 'Not available'],
-            ['Phone', academy.phone || 'Not available'],
-            ['Owner email', academy.ownerEmail],
-            ['Owner uid', academy.ownerUid],
+            ['Phone', academy.primary_phone || 'Not available'],
+            ['Owner name', academy.owner_name || 'Not available'],
+            ['Owner email', academy.owner_email || 'Not available'],
             ['Status', academy.status],
-            ['Created', formatFirestoreDate(academy.createdAt)],
-            ['Approved', formatFirestoreDate(academy.approvedAt)],
-            ['Approved by', academy.approvedBy || 'Not available'],
-            ['Rejection reason', academy.rejectionReason || 'Not available'],
+            ['Created', formatFirestoreDate(academy.created_at)],
+            ['Approved', formatFirestoreDate(academy.approved_at)],
+            ['Approved by', academy.approved_by || 'Not available'],
+            ['Notes', academy.notes || 'Not available'],
           ].map(([label, value]) => (
             <div className="rounded-2xl bg-slate-50 p-4" key={label}>
               <div className="text-xs font-black uppercase tracking-wide text-slate-500">{label}</div>
@@ -136,7 +127,7 @@ export function SuperAdminAcademyDetailPage() {
       <div className="flex flex-wrap gap-3">
         {academy.status === 'pending' ? (
           <>
-            <button className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white" onClick={() => runAction(() => approveAcademy(academy.id, userProfile!), `${academy.name} approved.`)} type="button">
+            <button className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white" onClick={() => runAction(() => approveAcademy(academy.id).then(() => undefined), `${academy.name} approved.`)} type="button">
               <CheckCircle2 size={18} /> Approve
             </button>
             <button className="inline-flex items-center gap-2 rounded-2xl border border-rose-100 bg-white px-4 py-3 text-sm font-black text-rose-600" onClick={handleReject} type="button">
@@ -145,16 +136,18 @@ export function SuperAdminAcademyDetailPage() {
           </>
         ) : null}
         {academy.status === 'active' ? (
-          <button className="inline-flex items-center gap-2 rounded-2xl border border-rose-100 bg-white px-4 py-3 text-sm font-black text-rose-600" onClick={() => runAction(() => disableAcademy(academy.id, userProfile!), `${academy.name} disabled.`)} type="button">
+          <button className="inline-flex items-center gap-2 rounded-2xl border border-rose-100 bg-white px-4 py-3 text-sm font-black text-rose-600" onClick={() => runAction(() => disableAcademy(academy.id).then(() => undefined), `${academy.name} disabled.`)} type="button">
             <Ban size={18} /> Disable
           </button>
         ) : null}
         {academy.status === 'disabled' ? (
-          <button className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white" onClick={() => runAction(() => reactivateAcademy(academy.id, userProfile!), `${academy.name} reactivated.`)} type="button">
+          <button className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white" onClick={() => runAction(() => reactivateAcademy(academy.id).then(() => undefined), `${academy.name} reactivated.`)} type="button">
             <RotateCcw size={18} /> Reactivate
           </button>
         ) : null}
       </div>
+
+      <EmptyState title="Students, coaches, batches, and invites migrate next" description="This page now reads the academy profile from Supabase. Related academy operating data will appear after the next migration phase." />
     </div>
   );
 }

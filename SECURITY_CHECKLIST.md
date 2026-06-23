@@ -2,8 +2,8 @@
 
 ## Current Rule Assumptions
 
-- Firebase Auth is required for application data access.
-- Super admin access is currently bootstrapped by the email allowlist in `firestore.rules` and `src/constants/superAdmin.ts`.
+- Supabase Auth is used for Direct login, logout, session state, and role-based routing.
+- Super admin access for Direct auth comes from `public.profiles.platform_role = 'super_admin'`.
 - User role, status, academy assignment, and linked profile fields are protected from normal self-editing.
 - Academy registration is still created from the client as a `pending` academy.
 - Invite acceptance is still client-driven and has a narrow rules exception.
@@ -23,7 +23,7 @@
 
 ## Known Limitations
 
-- Super admin status is not yet enforced with Firebase custom claims.
+- Firestore-backed academy data is still legacy Firebase data and has not been migrated to Supabase yet.
 - Approval, rejection, disable/reactivate, and invite acceptance are still performed from the client.
 - Invite reads are limited to signed-in users whose Google email matches the pending invite email; invite links may need users to sign in before details are shown.
 - Coach access is currently academy-scoped, not assigned-batch scoped.
@@ -34,7 +34,7 @@
 
 - Move academy approval/rejection/status actions to Cloud Functions.
 - Move invite acceptance to Cloud Functions.
-- Add Firebase custom claims for `super_admin`.
+- Migrate academy, coach, student, invite, and audit data access to Supabase policies.
 - Add strict coach assigned-batch rules.
 - Add strict student attendance/report filtering.
 - Add V2 parent account support with multiple linked children and parent-child access rules.

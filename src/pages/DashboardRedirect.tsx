@@ -1,9 +1,9 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { getDashboardPathByRole } from '../utils/roleRedirects';
+import { getProfileRedirectPath } from '../utils/roleRedirects';
 
 export function DashboardRedirect() {
-  const { isAuthenticated, loading, role, userProfile } = useAuth();
+  const { isAuthenticated, loading, userProfile } = useAuth();
 
   if (loading) {
     return (
@@ -16,9 +16,8 @@ export function DashboardRedirect() {
     );
   }
 
-  if (!isAuthenticated || !role) return <Navigate to="/login" replace />;
+  if (!isAuthenticated || !userProfile) return <Navigate to="/login" replace />;
   if (userProfile?.status === 'disabled') return <Navigate to="/unauthorized" replace />;
-  if (role === 'unassigned') return <Navigate to="/onboarding" replace />;
 
-  return <Navigate to={getDashboardPathByRole(role)} replace />;
+  return <Navigate to={getProfileRedirectPath(userProfile)} replace />;
 }

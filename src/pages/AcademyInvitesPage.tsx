@@ -27,7 +27,7 @@ export function AcademyInvitesPage() {
   const [error, setError] = useState('');
 
   const loadInvites = async () => {
-    if (!academyId || userProfile?.role !== 'academy_admin') {
+    if (!academyId || userProfile?.app_role !== 'academy_admin') {
       setLoading(false);
       return;
     }
@@ -39,7 +39,7 @@ export function AcademyInvitesPage() {
 
   useEffect(() => {
     void loadInvites();
-  }, [academyId, userProfile?.role]);
+  }, [academyId, userProfile?.app_role]);
 
   const handleCopy = async (invite: AcademyInvite) => {
     const link = academyInviteLink(invite.role, invite.inviteToken);

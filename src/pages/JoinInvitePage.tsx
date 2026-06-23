@@ -6,7 +6,7 @@ import { BrandMark } from '../components/ui/BrandMark';
 import { useAuth, isInviteExpired } from '../contexts/AuthContext';
 import { db } from '../lib/firebase';
 import type { AcademyInvite, InvitableRole } from '../types/auth';
-import { getAuthRedirectPath } from '../utils/roleRedirects';
+import { getProfileRedirectPath } from '../utils/roleRedirects';
 
 type LinkedProfile = {
   name?: string;
@@ -31,7 +31,7 @@ function profileCollection(role: InvitableRole) {
 export function JoinInvitePage() {
   const { role, inviteToken } = useParams();
   const navigate = useNavigate();
-  const { acceptInvite, firebaseUser, loginWithGoogle } = useAuth();
+  const { acceptInvite, signInWithGoogle, user } = useAuth();
   const [invite, setInvite] = useState<AcademyInvite | null>(null);
   const [academyName, setAcademyName] = useState('');
   const [profile, setProfile] = useState<LinkedProfile | null>(null);
@@ -92,7 +92,7 @@ export function JoinInvitePage() {
     setSubmitting(true);
     setError('');
     try {
-      await loginWithGoogle();
+      await signInWithGoogle();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Google sign-in failed.');
     } finally {
@@ -106,7 +106,7 @@ export function JoinInvitePage() {
     setError('');
     try {
       const updatedProfile = await acceptInvite(invite);
-      navigate(getAuthRedirectPath(updatedProfile), { replace: true });
+      navigate(getProfileRedirectPath(updatedProfile), { replace: true });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not accept this invite.');
     } finally {
@@ -114,7 +114,7 @@ export function JoinInvitePage() {
     }
   };
 
-  const signedInEmail = firebaseUser?.email?.toLowerCase() ?? '';
+  const signedInEmail = user?.email?.toLowerCase() ?? '';
   const inviteEmail = invite?.email.toLowerCase() ?? '';
   const emailMatches = Boolean(invite && signedInEmail && signedInEmail === inviteEmail);
 
@@ -147,14 +147,14 @@ export function JoinInvitePage() {
               {profile?.parentName ? <div><span className="font-black text-navy">Guardian / Contact:</span> {profile.parentName}</div> : null}
             </div>
 
-            {!firebaseUser ? (
+            {!user ? (
               <button className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white disabled:opacity-60" disabled={submitting} onClick={handleLogin} type="button">
                 <LogIn size={18} />
                 {submitting ? 'Connecting...' : 'Continue with Google'}
               </button>
             ) : !emailMatches ? (
               <div className="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
-                This invite was sent to {invite.email}. You are signed in as {firebaseUser.email}. Please sign in with the invited Google account.
+                This invite was sent to {invite.email}. You are signed in as {user.email}. Please sign in with the invited Google account.
               </div>
             ) : (
               <button className="mt-6 w-full rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white disabled:opacity-60" disabled={submitting} onClick={handleAccept} type="button">

@@ -101,7 +101,7 @@ export function AcademyBatchesPage() {
   const activeStudents = useMemo(() => students.filter((student) => student.status === 'active'), [students]);
 
   const loadBatches = async () => {
-    if (!academyId || userProfile?.role !== 'academy_admin') {
+    if (!academyId || userProfile?.app_role !== 'academy_admin') {
       setLoading(false);
       return;
     }
@@ -119,7 +119,7 @@ export function AcademyBatchesPage() {
 
   useEffect(() => {
     void loadBatches();
-  }, [academyId, userProfile?.role]);
+  }, [academyId, userProfile?.app_role]);
 
   const updateField = (field: keyof BatchForm, value: string | string[]) => setForm((current) => ({ ...current, [field]: value }));
 

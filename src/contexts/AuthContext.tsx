@@ -1,19 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
-import { collection, doc, getDocs, limit, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, getDoc } from 'firebase/firestore';
-import { SUPER_ADMIN_EMAILS } from '../constants/superAdmin';
-import { auth, db } from '../lib/firebase';
-import type { AcademyInvite, AcademyRegistration, FirebaseUser, InvitableRole, Role, UserProfile } from '../types/auth';
-import { createAuditLog } from '../utils/superAdminActions';
+import type { Session } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabaseClient';
+import type { AcademyInvite, AcademyRegistration, AuthUser, InvitableRole, Role, UserProfile, UserStatus } from '../types/auth';
 
 type AuthContextValue = {
-  firebaseUser: FirebaseUser | null;
+  user: AuthUser | null;
+  session: Session | null;
+  profile: UserProfile | null;
   userProfile: UserProfile | null;
   role: Role | null;
   loading: boolean;
   isAuthenticated: boolean;
-  loginWithGoogle: () => Promise<UserProfile | null>;
+  signInWithGoogle: () => Promise<UserProfile | null>;
+  signOut: () => Promise<void>;
   logout: () => Promise<void>;
+  refreshProfile: () => Promise<UserProfile | null>;
   refreshUserProfile: () => Promise<UserProfile | null>;
   registerAcademy: (input: { name: string; city: string; phone: string }) => Promise<string>;
   approveAcademy: (academy: AcademyRegistration) => Promise<void>;
@@ -23,72 +24,129 @@ type AuthContextValue = {
   acceptInvite: (invite: AcademyInvite) => Promise<UserProfile>;
 };
 
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+  phone: string | null;
+  platform_role: string | null;
+  app_role: string | null;
+  status: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  academy_id?: string | null;
+  linked_coach_id?: string | null;
+  linked_student_id?: string | null;
+  linked_parent_id?: string | null;
+};
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const provider = new GoogleAuthProvider();
+const appRoles = new Set<Role>(['academy_admin', 'coach', 'parent', 'student', 'unassigned', 'user']);
+const userStatuses = new Set<UserStatus>(['active', 'pending', 'disabled']);
 
-function isSuperAdminEmail(email: string | null) {
-  if (!email) return false;
-  return SUPER_ADMIN_EMAILS.map((item) => item.toLowerCase()).includes(email.toLowerCase());
+function getProfileRouteRole(profile: UserProfile | null): Role | null {
+  if (!profile) return null;
+  if (profile.platform_role === 'super_admin') return 'super_admin';
+  return profile.app_role;
 }
 
-function normalizeProfile(data: Partial<UserProfile>, uid: string): UserProfile {
+function resolveRole(row: Pick<ProfileRow, 'platform_role' | 'app_role'>): Role {
+  if (row.platform_role === 'super_admin') return 'super_admin';
+  if (row.app_role && appRoles.has(row.app_role as Role)) return row.app_role as Role;
+  return 'user';
+}
+
+function normalizeStatus(status: string | null): UserStatus {
+  return status && userStatuses.has(status as UserStatus) ? status as UserStatus : 'active';
+}
+
+function normalizeProfile(row: ProfileRow, user: AuthUser): UserProfile {
+  const name = row.full_name ?? user.user_metadata?.full_name ?? user.email ?? 'Kairoyr Direct User';
+  const appRole = row.app_role && appRoles.has(row.app_role as Role) ? row.app_role as Role : 'user';
+  const platformRole = row.platform_role ?? 'user';
   return {
-    uid,
-    name: data.name ?? '',
-    email: data.email ?? '',
-    photoURL: data.photoURL ?? null,
-    role: data.role ?? 'unassigned',
-    academyId: data.academyId ?? null,
-    linkedCoachId: data.linkedCoachId ?? null,
-    linkedStudentId: data.linkedStudentId ?? null,
-    linkedParentId: data.linkedParentId ?? null,
-    status: data.status ?? 'pending',
-    createdAt: data.createdAt ?? null,
-    updatedAt: data.updatedAt ?? null,
-    lastLoginAt: data.lastLoginAt ?? null,
+    id: row.id,
+    full_name: name,
+    avatar_url: row.avatar_url ?? user.user_metadata?.avatar_url ?? null,
+    phone: row.phone,
+    platform_role: platformRole,
+    app_role: appRole,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    uid: row.id,
+    name,
+    email: (row.email ?? user.email ?? '').toLowerCase(),
+    photoURL: row.avatar_url ?? user.user_metadata?.avatar_url ?? null,
+    role: resolveRole(row),
+    platformRole,
+    appRole,
+    status: normalizeStatus(row.status),
+    academyId: row.academy_id ?? null,
+    linkedCoachId: row.linked_coach_id ?? null,
+    linkedStudentId: row.linked_student_id ?? null,
+    linkedParentId: row.linked_parent_id ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastLoginAt: null,
   };
 }
 
-async function getOrCreateUserProfile(user: FirebaseUser) {
-  const userRef = doc(db, 'users', user.uid);
-  const snapshot = await getDoc(userRef);
+async function getOrCreateUserProfile(user: AuthUser) {
+  const { data: existingProfile, error: fetchError } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .maybeSingle<ProfileRow>();
 
-  if (snapshot.exists()) {
-    const isSuperAdmin = isSuperAdminEmail(user.email);
-    await updateDoc(userRef, {
-      name: user.displayName ?? snapshot.data().name ?? user.email ?? 'Kairoyr Direct User',
-      photoURL: user.photoURL,
-      ...(isSuperAdmin ? { role: 'super_admin', status: 'active', academyId: null } : {}),
-      lastLoginAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    const updatedSnapshot = await getDoc(userRef);
-    return normalizeProfile(updatedSnapshot.data() as Partial<UserProfile>, user.uid);
-  }
+  if (fetchError) throw fetchError;
+  if (existingProfile) return normalizeProfile(existingProfile, user);
 
-  const isSuperAdmin = isSuperAdminEmail(user.email);
-  const role: Role = isSuperAdmin ? 'super_admin' : 'unassigned';
-  const status = isSuperAdmin ? 'active' : 'pending';
-  const profile = {
-    uid: user.uid,
-    name: user.displayName ?? user.email ?? 'Kairoyr Direct User',
+  const newProfile = {
+    id: user.id,
     email: (user.email ?? '').toLowerCase(),
-    photoURL: user.photoURL,
-    role,
-    academyId: null,
-    linkedCoachId: null,
-    linkedStudentId: null,
-    linkedParentId: null,
-    status,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    lastLoginAt: serverTimestamp(),
+    full_name: user.user_metadata?.full_name ?? null,
+    avatar_url: user.user_metadata?.avatar_url ?? null,
+    platform_role: 'user',
+    app_role: 'user',
+    status: 'active',
   };
 
-  await setDoc(userRef, profile);
-  const createdSnapshot = await getDoc(userRef);
-  return normalizeProfile(createdSnapshot.data() as Partial<UserProfile>, user.uid);
+  const { data: createdProfile, error: insertError } = await supabase
+    .from('profiles')
+    .insert(newProfile)
+    .select('*')
+    .single<ProfileRow>();
+
+  if (insertError) throw insertError;
+  return normalizeProfile(createdProfile, user);
+}
+
+async function updateProfileRole(
+  userId: string,
+  input: {
+    app_role: Role;
+    status?: UserStatus;
+    academy_id?: string | null;
+    linked_coach_id?: string | null;
+    linked_student_id?: string | null;
+    linked_parent_id?: string | null;
+  },
+) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      app_role: input.app_role,
+      status: input.status ?? 'active',
+      academy_id: input.academy_id ?? null,
+      linked_coach_id: input.linked_coach_id ?? null,
+      linked_student_id: input.linked_student_id ?? null,
+      linked_parent_id: input.linked_parent_id ?? null,
+    })
+    .eq('id', userId);
+
+  if (error) throw error;
 }
 
 function makeInviteToken() {
@@ -97,12 +155,21 @@ function makeInviteToken() {
 
 export function isInviteExpired(expiresAt: unknown) {
   if (!expiresAt) return false;
-  if (expiresAt instanceof Timestamp) return expiresAt.toDate().getTime() < Date.now();
+  if (typeof expiresAt === 'object' && 'toDate' in expiresAt && typeof expiresAt.toDate === 'function') {
+    return expiresAt.toDate().getTime() < Date.now();
+  }
   if (expiresAt instanceof Date) return expiresAt.getTime() < Date.now();
   return false;
 }
 
+async function loadFirestoreDataLayer() {
+  const firestore = await import('firebase/firestore');
+  const { db } = await import('../lib/firebase');
+  return { ...firestore, db };
+}
+
 async function createInvite(input: { academyId: string; role: InvitableRole; email: string; linkedProfileId: string; createdByUid: string }) {
+  const { collection, db, doc, serverTimestamp, setDoc, Timestamp } = await loadFirestoreDataLayer();
   const inviteRef = doc(collection(db, 'academyInvites'));
   const inviteToken = makeInviteToken();
   // TODO: Store inviteToken hash instead of raw token before production.
@@ -123,101 +190,125 @@ async function createInvite(input: { academyId: string; role: InvitableRole; ema
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUserProfile = useCallback(async () => {
-    if (!auth.currentUser) {
+  const loadSessionProfile = useCallback(async (activeSession: Session | null) => {
+    setSession(activeSession);
+    setUser(activeSession?.user ?? null);
+
+    if (!activeSession?.user) {
       setUserProfile(null);
       return null;
     }
 
-    const profile = await getOrCreateUserProfile(auth.currentUser);
+    const profile = await getOrCreateUserProfile(activeSession.user);
+    setUserProfile(profile);
+    return profile;
+  }, []);
+
+  const refreshUserProfile = useCallback(async () => {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      setUserProfile(null);
+      return null;
+    }
+
+    setUser(userData.user);
+    const profile = await getOrCreateUserProfile(userData.user);
     setUserProfile(profile);
     return profile;
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setLoading(true);
-      setFirebaseUser(user);
+    let active = true;
 
+    const loadInitialSession = async () => {
+      setLoading(true);
       try {
-        if (user) {
-          const profile = await getOrCreateUserProfile(user);
-          setUserProfile(profile);
-        } else {
-          setUserProfile(null);
-        }
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (active) await loadSessionProfile(data.session);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
+    };
+
+    void loadInitialSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, activeSession) => {
+      void (async () => {
+        setLoading(true);
+        try {
+          await loadSessionProfile(activeSession);
+        } finally {
+          setLoading(false);
+        }
+      })();
     });
 
-    return unsubscribe;
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [loadSessionProfile]);
+
+  const signInWithGoogle = useCallback(async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) throw error;
+    return null;
   }, []);
 
-  const loginWithGoogle = useCallback(async () => {
-    const result = await signInWithPopup(auth, provider);
-    const profile = await getOrCreateUserProfile(result.user);
-    setFirebaseUser(result.user);
-    setUserProfile(profile);
-    return profile;
-  }, []);
-
-  const logout = useCallback(async () => {
-    await signOut(auth);
-    setFirebaseUser(null);
+  const signOutUser = useCallback(async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    setSession(null);
+    setUser(null);
     setUserProfile(null);
   }, []);
 
   const registerAcademy = useCallback(async (input: { name: string; city: string; phone: string }) => {
-    if (!auth.currentUser) {
+    if (!user) {
       throw new Error('You must be logged in to register an academy.');
     }
-    const academyRef = doc(collection(db, 'academies'));
-    await setDoc(academyRef, {
+    const { createAcademy } = await import('../lib/academyApi');
+    const academy = await createAcademy({
       name: input.name,
       city: input.city,
-      phone: input.phone,
-      ownerUid: auth.currentUser.uid,
-      ownerEmail: (auth.currentUser.email ?? '').toLowerCase(),
+      primary_phone: input.phone,
+      owner_email: (user.email ?? '').toLowerCase(),
+      owner_name: userProfile?.full_name ?? user.user_metadata?.full_name ?? user.email ?? null,
+      owner_phone: input.phone,
       status: 'pending',
-      createdAt: serverTimestamp(),
-      approvedAt: null,
-      approvedBy: null,
     });
-    return academyRef.id;
-  }, []);
+    return academy.id;
+  }, [user, userProfile?.full_name]);
 
   const approveAcademy = useCallback(async (academy: AcademyRegistration) => {
-    if (!auth.currentUser) {
+    if (!user) {
       throw new Error('You must be logged in to approve academies.');
     }
-
-    await updateDoc(doc(db, 'academies', academy.id), {
-      status: 'active',
-      approvedAt: serverTimestamp(),
-      approvedBy: auth.currentUser.uid,
-    });
-    await updateDoc(doc(db, 'users', academy.ownerUid), {
-      role: 'academy_admin',
-      status: 'active',
-      academyId: academy.id,
-      updatedAt: serverTimestamp(),
-    });
-  }, []);
+    const { approveAcademy: approveSupabaseAcademy } = await import('../lib/academyApi');
+    await approveSupabaseAcademy(academy.id);
+  }, [user]);
 
   const createAcademyCoach = useCallback(async (input: { name: string; email: string; phone: string }) => {
-    if (!auth.currentUser || !userProfile?.academyId) throw new Error('Only academy admins can add coaches.');
+    if (!user || !userProfile?.academyId) throw new Error('Only academy admins can add coaches.');
+    const { collection, db, doc, serverTimestamp, setDoc } = await loadFirestoreDataLayer();
     const coachRef = doc(collection(db, 'academies', userProfile.academyId, 'coaches'));
     const invite = await createInvite({
       academyId: userProfile.academyId,
       role: 'coach',
       email: input.email,
       linkedProfileId: coachRef.id,
-      createdByUid: auth.currentUser.uid,
+      createdByUid: user.id,
     });
     await setDoc(coachRef, {
       name: input.name,
@@ -230,17 +321,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updatedAt: serverTimestamp(),
     });
     return invite.inviteToken;
-  }, [userProfile?.academyId]);
+  }, [user, userProfile?.academyId]);
 
   const createAcademyStudent = useCallback(async (input: { name: string; email: string; phone: string; guardianName?: string; guardianPhone?: string; guardianEmail?: string }) => {
-    if (!auth.currentUser || !userProfile?.academyId) throw new Error('Only academy admins can add students.');
+    if (!user || !userProfile?.academyId) throw new Error('Only academy admins can add students.');
+    const { collection, db, doc, serverTimestamp, setDoc } = await loadFirestoreDataLayer();
     const studentRef = doc(collection(db, 'academies', userProfile.academyId, 'students'));
     const invite = await createInvite({
       academyId: userProfile.academyId,
       role: 'student',
       email: input.email,
       linkedProfileId: studentRef.id,
-      createdByUid: auth.currentUser.uid,
+      createdByUid: user.id,
     });
     await setDoc(studentRef, {
       name: input.name,
@@ -259,45 +351,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updatedAt: serverTimestamp(),
     });
     return invite.inviteToken;
-  }, [userProfile?.academyId]);
+  }, [user, userProfile?.academyId]);
 
   const revokeInvite = useCallback(async (inviteId: string) => {
+    const { db, doc, updateDoc } = await loadFirestoreDataLayer();
     await updateDoc(doc(db, 'academyInvites', inviteId), { status: 'revoked' });
   }, []);
 
   const acceptInvite = useCallback(async (invite: AcademyInvite) => {
-    if (!auth.currentUser) throw new Error('You must sign in to accept this invite.');
-    const signedInEmail = (auth.currentUser.email ?? '').toLowerCase();
+    if (!user) throw new Error('You must sign in to accept this invite.');
+    const signedInEmail = (user.email ?? '').toLowerCase();
     if (signedInEmail !== invite.email.toLowerCase()) {
       throw new Error(`This invite was sent to ${invite.email}. Please sign in with that Google account.`);
     }
     if (invite.status !== 'pending') throw new Error('This invite is no longer pending.');
     if (isInviteExpired(invite.expiresAt)) throw new Error('This invite has expired.');
+    const { db, doc, serverTimestamp, updateDoc } = await loadFirestoreDataLayer();
 
     const linkedFields = {
       linkedCoachId: invite.role === 'coach' ? invite.linkedProfileId : null,
       linkedStudentId: invite.role === 'student' ? invite.linkedProfileId : null,
       linkedParentId: null,
     };
-    await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+    await updateDoc(doc(db, 'users', user.id), {
       role: invite.role,
       status: 'active',
       academyId: invite.academyId,
       ...linkedFields,
       updatedAt: serverTimestamp(),
     });
+    await updateProfileRole(user.id, {
+      app_role: invite.role,
+      status: 'active',
+      academy_id: invite.academyId,
+      linked_coach_id: invite.role === 'coach' ? invite.linkedProfileId : null,
+      linked_student_id: invite.role === 'student' ? invite.linkedProfileId : null,
+      linked_parent_id: null,
+    });
     const profileCollection = invite.role === 'coach' ? 'coaches' : 'students';
     await updateDoc(doc(db, 'academies', invite.academyId, profileCollection, invite.linkedProfileId), {
       status: 'active',
-      userUid: auth.currentUser.uid,
+      userUid: user.id,
       updatedAt: serverTimestamp(),
     });
     await updateDoc(doc(db, 'academyInvites', invite.id), {
       status: 'accepted',
-      acceptedByUid: auth.currentUser.uid,
+      acceptedByUid: user.id,
       acceptedAt: serverTimestamp(),
     });
     if (userProfile) {
+      const { createAuditLog } = await import('../utils/superAdminActions');
       await createAuditLog({
         actor: userProfile,
         action: 'invite.accepted',
@@ -311,17 +414,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const profile = await refreshUserProfile();
     if (!profile) throw new Error('Could not refresh joined profile.');
     return profile;
-  }, [refreshUserProfile, userProfile]);
+  }, [refreshUserProfile, user, userProfile]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      firebaseUser,
+      user,
+      session,
+      profile: userProfile,
       userProfile,
-      role: userProfile?.role ?? null,
+      role: getProfileRouteRole(userProfile),
       loading,
-      isAuthenticated: Boolean(firebaseUser),
-      loginWithGoogle,
-      logout,
+      isAuthenticated: Boolean(session?.user),
+      signInWithGoogle,
+      signOut: signOutUser,
+      logout: signOutUser,
+      refreshProfile: refreshUserProfile,
       refreshUserProfile,
       registerAcademy,
       approveAcademy,
@@ -330,7 +437,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       revokeInvite,
       acceptInvite,
     }),
-    [acceptInvite, approveAcademy, createAcademyCoach, createAcademyStudent, firebaseUser, loading, loginWithGoogle, logout, refreshUserProfile, registerAcademy, revokeInvite, userProfile],
+    [acceptInvite, approveAcademy, createAcademyCoach, createAcademyStudent, loading, refreshUserProfile, registerAcademy, revokeInvite, session, signInWithGoogle, signOutUser, user, userProfile],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

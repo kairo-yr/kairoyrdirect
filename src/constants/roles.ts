@@ -7,6 +7,7 @@ export const ROLES: Record<Role, Role> = {
   parent: 'parent',
   student: 'student',
   unassigned: 'unassigned',
+  user: 'user',
 };
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -16,6 +17,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   parent: 'Parent (Future)',
   student: 'Student',
   unassigned: 'Unassigned',
+  user: 'User',
 };
 
 export const ALL_ROLES = Object.values(ROLES);

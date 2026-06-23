@@ -30,7 +30,7 @@ export function RoleDashboard({ title, description, role }: { title: string; des
           </div>
           <div className="rounded-2xl bg-slate-50 p-4">
             <div className="text-xs font-black uppercase tracking-wide text-slate-400">Current Role</div>
-            <div className="mt-1 font-black text-navy">{userProfile?.role ? ROLE_LABELS[userProfile.role] : ROLE_LABELS[role]}</div>
+            <div className="mt-1 font-black text-navy">{userProfile?.app_role ? ROLE_LABELS[userProfile.app_role] : ROLE_LABELS[role]}</div>
           </div>
         </div>
         <p className="mt-5 text-xs leading-5 text-slate-500">

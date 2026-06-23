@@ -42,7 +42,7 @@ export function AcademyDashboard() {
 
   useEffect(() => {
     const loadDashboard = async () => {
-      if (!academyId || userProfile?.role !== 'academy_admin') {
+      if (!academyId || userProfile?.app_role !== 'academy_admin') {
         setLoading(false);
         return;
       }
@@ -71,7 +71,7 @@ export function AcademyDashboard() {
     };
 
     void loadDashboard();
-  }, [academyId, userProfile?.role]);
+  }, [academyId, userProfile?.app_role]);
 
   const recentStudents = useMemo(() => students.slice(0, 5), [students]);
   const recentCoaches = useMemo(() => coaches.slice(0, 5), [coaches]);

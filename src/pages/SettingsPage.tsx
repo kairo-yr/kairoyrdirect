@@ -1,7 +1,6 @@
 import { ShieldCheck, UserRound } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { RoadmapBadge } from '../components/ui/RoadmapBadge';
-import { SUPER_ADMIN_EMAILS } from '../constants/superAdmin';
 import { useAuth } from '../contexts/AuthContext';
 
 export function SettingsPage() {
@@ -58,19 +57,15 @@ export function SettingsPage() {
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
         <h2 className="text-xl font-black text-navy">Admin Access</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">Super admin access is controlled by the configured allowlist for V1.</p>
+        <p className="mt-2 text-sm leading-6 text-slate-600">Super admin access is controlled by the Supabase profile record.</p>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl bg-slate-50 p-4">
             <div className="text-xs font-black uppercase tracking-wide text-slate-500">Current email</div>
             <div className="mt-1 break-words font-black text-navy">{userProfile?.email || 'Not available'}</div>
           </div>
           <div className="rounded-2xl bg-slate-50 p-4">
-            <div className="text-xs font-black uppercase tracking-wide text-slate-500">Allowed super admin emails</div>
-            <div className="mt-2 space-y-1">
-              {SUPER_ADMIN_EMAILS.map((email) => (
-                <div className="font-mono text-sm font-black text-navy" key={email}>{email}</div>
-              ))}
-            </div>
+            <div className="text-xs font-black uppercase tracking-wide text-slate-500">Platform role</div>
+            <div className="mt-1 break-words font-black text-navy">{userProfile?.platformRole || 'Not available'}</div>
           </div>
         </div>
       </section>

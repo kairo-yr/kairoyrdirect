@@ -1,27 +1,28 @@
 import { useEffect, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
-import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
-import type { AcademyRegistration } from '../types/auth';
+import { approveAcademy, getAcademies, rejectAcademy, type Academy } from '../lib/academyApi';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
-import { approveAcademy, rejectAcademy } from '../utils/superAdminActions';
 
 export function SuperAdminApprovalsPage() {
-  const { userProfile } = useAuth();
-  const [academies, setAcademies] = useState<AcademyRegistration[]>([]);
+  const [academies, setAcademies] = useState<Academy[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   const refresh = async () => {
     setLoading(true);
-    const snapshot = await getDocs(query(collection(db, 'academies'), where('status', '==', 'pending')));
-    setAcademies(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyRegistration));
-    setLoading(false);
+    setError('');
+    try {
+      const loadedAcademies = await getAcademies();
+      setAcademies(loadedAcademies.filter((academy) => academy.status === 'pending'));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load pending academies.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -40,11 +41,10 @@ export function SuperAdminApprovalsPage() {
     }
   };
 
-  const handleReject = async (academy: AcademyRegistration) => {
-    if (!userProfile) return;
+  const handleReject = async (academy: Academy) => {
     const reason = window.prompt(`Reason for rejecting ${academy.name}?`);
     if (!reason?.trim()) return;
-    await runAction(() => rejectAcademy(academy.id, reason.trim(), userProfile), `${academy.name} rejected.`);
+    await runAction(() => rejectAcademy(academy.id, reason.trim()).then(() => undefined), `${academy.name} rejected.`);
   };
 
   return (
@@ -61,13 +61,13 @@ export function SuperAdminApprovalsPage() {
           {academies.map((academy) => (
             <tr className="border-t border-slate-100" key={academy.id}>
               <td className="px-5 py-4 font-black text-navy">{academy.name}</td>
-              <td className="px-5 py-4 text-slate-600">{academy.ownerEmail}</td>
+              <td className="px-5 py-4 text-slate-600">{academy.owner_email || 'Not available'}</td>
               <td className="px-5 py-4 text-slate-600">{academy.city || 'Not available'}</td>
-              <td className="px-5 py-4 text-slate-600">{academy.phone || 'Not available'}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(academy.createdAt)}</td>
+              <td className="px-5 py-4 text-slate-600">{academy.primary_phone || 'Not available'}</td>
+              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(academy.created_at)}</td>
               <td className="px-5 py-4">
                 <div className="flex flex-wrap gap-2">
-                  <button className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white" onClick={() => runAction(() => approveAcademy(academy.id, userProfile!), `${academy.name} approved.`)} type="button">
+                  <button className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white" onClick={() => runAction(() => approveAcademy(academy.id).then(() => undefined), `${academy.name} approved.`)} type="button">
                     <CheckCircle2 size={14} /> Approve
                   </button>
                   <button className="inline-flex items-center gap-1 rounded-xl border border-rose-100 px-3 py-2 text-xs font-black text-rose-600" onClick={() => handleReject(academy)} type="button">

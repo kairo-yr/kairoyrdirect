@@ -109,7 +109,7 @@ export function AcademyFeesPage() {
   const [actionNote, setActionNote] = useState('');
 
   const loadFees = async () => {
-    if (!academyId || userProfile?.role !== 'academy_admin') {
+    if (!academyId || userProfile?.app_role !== 'academy_admin') {
       setLoading(false);
       return;
     }
@@ -130,7 +130,7 @@ export function AcademyFeesPage() {
 
   useEffect(() => {
     void loadFees();
-  }, [academyId, userProfile?.role]);
+  }, [academyId, userProfile?.app_role]);
 
   const selectedMonthFees = useMemo(() => fees.filter((fee) => fee.month === selectedMonth), [fees, selectedMonth]);
 

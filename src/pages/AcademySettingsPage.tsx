@@ -23,7 +23,7 @@ export function AcademySettingsPage() {
 
   useEffect(() => {
     const loadAcademy = async () => {
-      if (!academyId || userProfile?.role !== 'academy_admin') {
+      if (!academyId || userProfile?.app_role !== 'academy_admin') {
         setLoading(false);
         return;
       }
@@ -40,7 +40,7 @@ export function AcademySettingsPage() {
       setLoading(false);
     };
     void loadAcademy();
-  }, [academyId, userProfile?.role]);
+  }, [academyId, userProfile?.app_role]);
 
   const updateField = (field: keyof AcademySettingsForm, value: string) => setForm((current) => ({ ...current, [field]: value }));
 

@@ -61,7 +61,7 @@ export function AcademyStudentsPage() {
   const inviteById = useMemo(() => new Map(invites.map((invite) => [invite.id, invite])), [invites]);
 
   const loadStudents = async () => {
-    if (!academyId || userProfile?.role !== 'academy_admin') {
+    if (!academyId || userProfile?.app_role !== 'academy_admin') {
       setLoading(false);
       return;
     }
@@ -79,7 +79,7 @@ export function AcademyStudentsPage() {
 
   useEffect(() => {
     void loadStudents();
-  }, [academyId, userProfile?.role]);
+  }, [academyId, userProfile?.app_role]);
 
   const updateField = (field: keyof StudentForm, value: string) => setForm((current) => ({ ...current, [field]: value }));
 

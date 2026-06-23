@@ -4,10 +4,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { BrandMark } from '../components/ui/BrandMark';
 import { APP_NAME } from '../config/brand';
 import { useAuth } from '../contexts/AuthContext';
-import { getAuthRedirectPath } from '../utils/roleRedirects';
+import { getProfileRedirectPath } from '../utils/roleRedirects';
 
 export function Login() {
-  const { loginWithGoogle } = useAuth();
+  const { signInWithGoogle } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -16,9 +16,9 @@ export function Login() {
     setError('');
     setSubmitting(true);
     try {
-      const profile = await loginWithGoogle();
+      const profile = await signInWithGoogle();
       if (profile) {
-        navigate(getAuthRedirectPath(profile), { replace: true });
+        navigate(getProfileRedirectPath(profile), { replace: true });
       }
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Google sign-in failed. Please try again.';
