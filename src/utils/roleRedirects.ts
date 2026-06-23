@@ -6,7 +6,7 @@ export const getDashboardPathByRole = (role: Role) => {
     super_admin: '/super-admin',
     academy_admin: '/academy',
     coach: '/coach',
-    parent: '/parent',
+    parent: '/onboarding',
     student: '/student',
     unassigned: '/onboarding',
   };

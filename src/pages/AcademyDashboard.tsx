@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
-import { CalendarCheck, ClipboardList, FileText, KeyRound, School, UserPlus, Users } from 'lucide-react';
+import { BookOpen, CalendarCheck, ClipboardList, FileText, KeyRound, School, UserPlus, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -17,6 +17,7 @@ type BatchRecord = { id: string; status?: string };
 type AttendanceRecord = { id: string; date?: string; status?: string };
 type ClassReportRecord = { id: string; date?: string; status?: string; title?: string; batchName?: string; createdAt?: unknown };
 type ProgressRecord = { id: string; date?: string; ratings?: { overall?: number; calculation?: number; homework?: number } };
+type HomeworkRecord = { id: string; dueDate?: string | null; status?: string };
 
 function getTodayDate() {
   const date = new Date();
@@ -35,6 +36,7 @@ export function AcademyDashboard() {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [classReports, setClassReports] = useState<ClassReportRecord[]>([]);
   const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
+  const [homeworkRecords, setHomeworkRecords] = useState<HomeworkRecord[]>([]);
   const [invites, setInvites] = useState<AcademyInvite[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -45,7 +47,7 @@ export function AcademyDashboard() {
         return;
       }
       setLoading(true);
-      const [academySnapshot, studentSnapshot, coachSnapshot, batchSnapshot, attendanceSnapshot, reportSnapshot, progressSnapshot, inviteSnapshot] = await Promise.all([
+      const [academySnapshot, studentSnapshot, coachSnapshot, batchSnapshot, attendanceSnapshot, reportSnapshot, progressSnapshot, homeworkSnapshot, inviteSnapshot] = await Promise.all([
         getDoc(doc(db, 'academies', academyId)),
         getDocs(collection(db, 'academies', academyId, 'students')),
         getDocs(collection(db, 'academies', academyId, 'coaches')),
@@ -53,6 +55,7 @@ export function AcademyDashboard() {
         getDocs(collection(db, 'academies', academyId, 'attendance')),
         getDocs(collection(db, 'academies', academyId, 'classReports')),
         getDocs(collection(db, 'academies', academyId, 'progressReports')),
+        getDocs(collection(db, 'academies', academyId, 'homework')),
         getDocs(query(collection(db, 'academyInvites'), where('academyId', '==', academyId))),
       ]);
       setAcademy(academySnapshot.exists() ? ({ id: academySnapshot.id, ...academySnapshot.data() } as AcademyRegistration) : null);
@@ -62,6 +65,7 @@ export function AcademyDashboard() {
       setAttendanceRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord));
       setClassReports(reportSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ClassReportRecord));
       setProgressRecords(progressSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressRecord));
+      setHomeworkRecords(homeworkSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as HomeworkRecord));
       setInvites(inviteSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyInvite));
       setLoading(false);
     };
@@ -84,6 +88,12 @@ export function AcademyDashboard() {
   monthStart.setDate(1);
   const monthStartString = monthStart.toISOString().slice(0, 10);
   const progressThisMonth = progressRecords.filter((record) => String(record.date ?? '') >= monthStartString).length;
+  const activeHomeworkCount = homeworkRecords.filter((record) => record.status === 'active').length;
+  const weekEnd = new Date();
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  const todayString = getTodayDate();
+  const weekEndString = weekEnd.toISOString().slice(0, 10);
+  const homeworkDueThisWeek = homeworkRecords.filter((record) => record.status === 'active' && String(record.dueDate ?? '') >= todayString && String(record.dueDate ?? '') <= weekEndString).length;
   const progressWithOverall = progressRecords.filter((record) => Number(record.ratings?.overall ?? 0) > 0);
   const averageProgress = progressWithOverall.length
     ? Math.round((progressWithOverall.reduce((total, record) => total + Number(record.ratings?.overall ?? 0), 0) / progressWithOverall.length) * 10) / 10
@@ -134,6 +144,8 @@ export function AcademyDashboard() {
         <StatCard label="Needs Attention" value={loading ? '...' : String(studentsNeedingAttention)} helper="Low progress ratings" icon={Users} />
         <StatCard label="Progress This Month" value={loading ? '...' : String(progressThisMonth)} helper="Manual updates" icon={ClipboardList} />
         <StatCard label="Avg Progress" value={averageProgress === null ? 'No data' : String(averageProgress)} helper="Overall rating" icon={ClipboardList} />
+        <StatCard label="Active Homework" value={loading ? '...' : String(activeHomeworkCount)} helper="Practice assignments" icon={BookOpen} />
+        <StatCard label="Homework Due" value={loading ? '...' : String(homeworkDueThisWeek)} helper="Due this week" icon={BookOpen} />
       </div>
 
       <section className="grid gap-3 md:grid-cols-7">
@@ -143,6 +155,7 @@ export function AcademyDashboard() {
         <Link className="rounded-2xl bg-directBlue px-4 py-3 text-center text-sm font-black text-white" to="/academy/attendance">Attendance</Link>
         <Link className="rounded-2xl bg-directBlue px-4 py-3 text-center text-sm font-black text-white" to="/academy/class-reports">Class Reports</Link>
         <Link className="rounded-2xl bg-directBlue px-4 py-3 text-center text-sm font-black text-white" to="/academy/progress">Progress</Link>
+        <Link className="rounded-2xl bg-directBlue px-4 py-3 text-center text-sm font-black text-white" to="/academy/homework">Homework</Link>
         <Link className="rounded-2xl bg-directBlue px-4 py-3 text-center text-sm font-black text-white" to="/academy/invites">View Invites</Link>
       </section>
 

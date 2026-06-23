@@ -3,20 +3,19 @@ import { Link } from 'react-router-dom';
 import { ROLE_LABELS } from '../../constants/roles';
 import { APP_NAME } from '../../config/brand';
 import { BrandMark } from '../ui/BrandMark';
-import { useAppData } from '../../hooks/useAppData';
 import { useAuth } from '../../contexts/AuthContext';
 import { getDashboardPathByRole } from '../../utils/roleRedirects';
 
-export function Header() {
-  const { academy } = useAppData();
+export function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const { isAuthenticated, logout, role, userProfile } = useAuth();
   const dashboardPath = role ? getDashboardPathByRole(role) : '/login';
+  const displayName = isAuthenticated ? userProfile?.name || APP_NAME : APP_NAME;
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 px-4 py-4 backdrop-blur lg:px-8">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 lg:hidden">
-          <button className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600" aria-label="Open navigation">
+          <button className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600" onClick={onMenuClick} type="button" aria-label="Open navigation" title="Open navigation">
             <Menu size={20} />
           </button>
           <BrandMark compact />
@@ -31,7 +30,7 @@ export function Header() {
             <Bell size={18} />
           </button>
           <div className="hidden text-right sm:block">
-            <div className="text-sm font-black text-navy">{isAuthenticated ? userProfile?.name || academy.name : academy.name}</div>
+            <div className="text-sm font-black text-navy">{displayName}</div>
             <div className="text-xs text-slate-500">{role ? ROLE_LABELS[role] : 'Not signed in'}</div>
           </div>
           {isAuthenticated && role ? (

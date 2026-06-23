@@ -42,6 +42,9 @@ export async function createAcademyStudentWithInvite(input: {
   name: string;
   email: string;
   phone: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  guardianEmail?: string;
   monthlyFee?: number | null;
 }) {
   const studentRef = doc(collection(db, 'academies', input.academyId, 'students'));
@@ -59,6 +62,12 @@ export async function createAcademyStudentWithInvite(input: {
     name: input.name,
     email: normalizedEmail,
     phone: input.phone,
+    parentName: input.guardianName?.trim() ?? '',
+    parentEmail: input.guardianEmail?.trim().toLowerCase() ?? '',
+    parentPhone: input.guardianPhone?.trim() ?? '',
+    guardianName: input.guardianName?.trim() ?? '',
+    guardianEmail: input.guardianEmail?.trim().toLowerCase() ?? '',
+    guardianPhone: input.guardianPhone?.trim() ?? '',
     monthlyFee: input.monthlyFee ?? null,
     status: invite ? 'invited' : 'active',
     batchId: null,

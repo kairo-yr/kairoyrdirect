@@ -18,7 +18,7 @@ type AuthContextValue = {
   registerAcademy: (input: { name: string; city: string; phone: string }) => Promise<string>;
   approveAcademy: (academy: AcademyRegistration) => Promise<void>;
   createAcademyCoach: (input: { name: string; email: string; phone: string }) => Promise<string>;
-  createAcademyStudent: (input: { name: string; email: string; phone: string; parentName: string; parentEmail: string }) => Promise<string>;
+  createAcademyStudent: (input: { name: string; email: string; phone: string; guardianName?: string; guardianPhone?: string; guardianEmail?: string }) => Promise<string>;
   revokeInvite: (inviteId: string) => Promise<void>;
   acceptInvite: (invite: AcademyInvite) => Promise<UserProfile>;
 };
@@ -232,7 +232,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return invite.inviteToken;
   }, [userProfile?.academyId]);
 
-  const createAcademyStudent = useCallback(async (input: { name: string; email: string; phone: string; parentName: string; parentEmail: string }) => {
+  const createAcademyStudent = useCallback(async (input: { name: string; email: string; phone: string; guardianName?: string; guardianPhone?: string; guardianEmail?: string }) => {
     if (!auth.currentUser || !userProfile?.academyId) throw new Error('Only academy admins can add students.');
     const studentRef = doc(collection(db, 'academies', userProfile.academyId, 'students'));
     const invite = await createInvite({
@@ -246,8 +246,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: input.name,
       email: input.email.toLowerCase(),
       phone: input.phone,
-      parentName: input.parentName,
-      parentEmail: input.parentEmail.toLowerCase(),
+      parentName: input.guardianName ?? '',
+      parentEmail: (input.guardianEmail ?? '').toLowerCase(),
+      parentPhone: input.guardianPhone ?? '',
+      guardianName: input.guardianName ?? '',
+      guardianEmail: (input.guardianEmail ?? '').toLowerCase(),
+      guardianPhone: input.guardianPhone ?? '',
       status: 'invited',
       userUid: null,
       inviteId: invite.inviteId,
@@ -273,7 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const linkedFields = {
       linkedCoachId: invite.role === 'coach' ? invite.linkedProfileId : null,
       linkedStudentId: invite.role === 'student' ? invite.linkedProfileId : null,
-      linkedParentId: invite.role === 'parent' ? invite.linkedProfileId : null,
+      linkedParentId: null,
     };
     await updateDoc(doc(db, 'users', auth.currentUser.uid), {
       role: invite.role,
@@ -282,7 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ...linkedFields,
       updatedAt: serverTimestamp(),
     });
-    const profileCollection = invite.role === 'coach' ? 'coaches' : invite.role === 'student' ? 'students' : 'parents';
+    const profileCollection = invite.role === 'coach' ? 'coaches' : 'students';
     await updateDoc(doc(db, 'academies', invite.academyId, profileCollection, invite.linkedProfileId), {
       status: 'active',
       userUid: auth.currentUser.uid,

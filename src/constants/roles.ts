@@ -13,7 +13,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   super_admin: 'Kairoyr Super Admin',
   academy_admin: 'Academy Admin',
   coach: 'Coach',
-  parent: 'Parent',
+  parent: 'Parent (Future)',
   student: 'Student',
   unassigned: 'Unassigned',
 };

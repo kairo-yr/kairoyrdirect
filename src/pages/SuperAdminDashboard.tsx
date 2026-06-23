@@ -30,7 +30,6 @@ type DashboardCounts = {
   academyAdmins: number;
   coaches: number;
   students: number;
-  parents: number;
   unassignedUsers: number;
   totalInvites: number;
   pendingInvites: number;
@@ -46,7 +45,6 @@ const initialCounts: DashboardCounts = {
   academyAdmins: 0,
   coaches: 0,
   students: 0,
-  parents: 0,
   unassignedUsers: 0,
   totalInvites: 0,
   pendingInvites: 0,
@@ -80,7 +78,6 @@ export function SuperAdminDashboard() {
         academyAdmins: users.filter((user) => user.role === 'academy_admin').length,
         coaches: users.filter((user) => user.role === 'coach').length,
         students: users.filter((user) => user.role === 'student').length,
-        parents: users.filter((user) => user.role === 'parent').length,
         unassignedUsers: users.filter((user) => user.role === 'unassigned').length,
         totalInvites: invites.length,
         pendingInvites: invites.filter((invite) => invite.status === 'pending').length,
@@ -111,7 +108,6 @@ export function SuperAdminDashboard() {
         <StatCard label="Academy Admins" value={loading ? '...' : String(counts.academyAdmins)} helper="Active academy owners" icon={UserRound} />
         <StatCard label="Coaches" value={loading ? '...' : String(counts.coaches)} helper="Coach accounts" icon={UserRound} />
         <StatCard label="Students" value={loading ? '...' : String(counts.students)} helper="Student accounts" icon={UserRound} />
-        <StatCard label="Parents" value={loading ? '...' : String(counts.parents)} helper="Parent accounts" icon={UserRound} />
         <StatCard label="Unassigned Users" value={loading ? '...' : String(counts.unassignedUsers)} helper="Pending onboarding" icon={UserRound} />
         <StatCard label="Total Invites" value={loading ? '...' : String(counts.totalInvites)} helper="Invite records" icon={KeyRound} />
         <StatCard label="Pending Invites" value={loading ? '...' : String(counts.pendingInvites)} helper={`${counts.acceptedInvites} accepted`} icon={KeyRound} />

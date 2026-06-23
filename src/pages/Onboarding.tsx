@@ -98,7 +98,7 @@ export function Onboarding() {
               <h2 className="text-xl font-black">Join with invite link</h2>
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              Coaches, students, and parents join only through an email-matched invite link created by the academy admin.
+              Coaches and students join through an email-matched invite link created by the academy admin. A guardian may use their Google account to accept a student invite.
             </p>
             <div className="mt-5">
               <FormInput label="Invite link" value={inviteLink} placeholder="https://.../join/student/invite-token" onChange={(event) => setInviteLink(event.target.value)} />

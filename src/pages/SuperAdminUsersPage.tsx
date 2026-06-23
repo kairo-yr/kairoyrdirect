@@ -82,7 +82,6 @@ export function SuperAdminUsersPage() {
             { label: 'Academy admin', value: 'academy_admin' },
             { label: 'Coach', value: 'coach' },
             { label: 'Student', value: 'student' },
-            { label: 'Parent', value: 'parent' },
             { label: 'Unassigned', value: 'unassigned' },
           ]} />
           <FormSelect label="Status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} options={[

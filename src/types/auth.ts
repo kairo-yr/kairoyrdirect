@@ -5,7 +5,7 @@ export type Role = 'super_admin' | 'academy_admin' | 'coach' | 'parent' | 'stude
 export type UserStatus = 'active' | 'pending' | 'disabled';
 export type AcademyStatus = 'pending' | 'active' | 'rejected' | 'disabled';
 export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
-export type InvitableRole = 'coach' | 'parent' | 'student';
+export type InvitableRole = 'coach' | 'student';
 
 export type FirebaseUser = User;
 
@@ -79,6 +79,10 @@ export interface AcademyStudentProfile {
   phone: string;
   parentName: string;
   parentEmail: string;
+  parentPhone?: string;
+  guardianName?: string;
+  guardianEmail?: string;
+  guardianPhone?: string;
   monthlyFee?: number | null;
   batchId?: string | null;
   status: 'invited' | 'active' | 'disabled';

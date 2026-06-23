@@ -21,7 +21,6 @@ import { FeatureCard } from '../components/landing/FeatureCard';
 import { BrandMark } from '../components/ui/BrandMark';
 import { RoadmapBadge } from '../components/ui/RoadmapBadge';
 import { APP_NAME, APP_TAGLINE, PLAY_APP_NAME, SUPPORT_TEXT } from '../config/brand';
-import { features } from '../data/mockData';
 import { useAuth } from '../contexts/AuthContext';
 import { getDashboardPathByRole } from '../utils/roleRedirects';
 
@@ -40,6 +39,18 @@ const featureIcons = [
   ShieldCheck,
   PlayCircle,
 ];
+
+const features = [
+  { title: 'Student Management', description: 'Maintain academy-scoped student profiles, guardian contact details, fees, and status.', status: 'Beta' },
+  { title: 'Batch Management', description: 'Create batches by level, coach, schedule, and active roster.', status: 'Beta' },
+  { title: 'Coach Allocation', description: 'Keep coach views scoped to assigned batches and students.', status: 'Beta' },
+  { title: 'Attendance Tracking', description: 'Mark and review batch-wise attendance records.', status: 'Beta' },
+  { title: 'Class Reports', description: 'Capture class topics, homework notes, and student-specific observations.', status: 'Beta' },
+  { title: 'Fee Tracker', description: 'Generate monthly fee records and track payment status.', status: 'Beta' },
+  { title: 'Student Profiles', description: 'Show linked attendance, reports, progress, fees, and homework.', status: 'Beta' },
+  { title: 'Progress Dashboard', description: 'Track student growth across academy, coach, and student views.', status: 'Beta' },
+  { title: `${PLAY_APP_NAME} Access`, description: `Use optional ${PLAY_APP_NAME} links on homework while deeper sync is prepared.`, status: 'V1 Placeholder' },
+] as const;
 
 export function LandingPage() {
   const { isAuthenticated, role, userProfile, logout } = useAuth();
@@ -138,21 +149,21 @@ export function LandingPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs font-black uppercase tracking-widest text-blue-200">Academy overview</p>
-                    <RoadmapBadge status="Mock Data" />
+                    <p className="text-xs font-black uppercase tracking-widest text-blue-200">V1 workspace</p>
+                    <RoadmapBadge status="Beta" />
                   </div>
-                  <h2 className="mt-2 text-2xl font-black">This week in Direct</h2>
+                  <h2 className="mt-2 text-2xl font-black">Core academy workflows</h2>
                 </div>
                 <CheckCircle2 className="text-directGold" />
               </div>
               <div className="mt-8 grid grid-cols-3 gap-3">
                 {[
-                  ['186', 'Students'],
-                  ['24', 'Batches'],
-                  ['132', 'Reports'],
+                  ['Students', 'Profiles'],
+                  ['Batches', 'Classes'],
+                  ['Reports', 'Progress'],
                 ].map(([value, label]) => (
                   <div className="rounded-2xl bg-white/10 p-4" key={label}>
-                    <div className="text-2xl font-black">{value}</div>
+                    <div className="text-lg font-black">{value}</div>
                     <div className="text-xs text-slate-300">{label}</div>
                   </div>
                 ))}
@@ -223,7 +234,7 @@ export function LandingPage() {
             {[
               ['Academy Owner', 'View the whole academy, batches, fees, reports, and coach allocation.'],
               ['Independent Coach', 'Manage students and batches without needing a large academy setup.'],
-              ['Student/Parent', `Prepare for clean progress visibility and ${PLAY_APP_NAME} access.`],
+              ['Student', `Prepare for clean progress visibility and ${PLAY_APP_NAME} access.`],
             ].map(([title, description]) => (
               <div className="rounded-3xl bg-white p-6 shadow-card" key={title}>
                 <h3 className="text-xl font-black text-navy">{title}</h3>

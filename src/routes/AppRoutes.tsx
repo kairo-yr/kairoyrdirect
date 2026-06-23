@@ -6,29 +6,27 @@ import { AcademyClassReportsPage, CoachClassReportsPage } from '../pages/Academy
 import { AcademyDashboard } from '../pages/AcademyDashboard';
 import { AcademyBatchesPage } from '../pages/AcademyBatchesPage';
 import { AcademyCoachesPage } from '../pages/AcademyCoachesPage';
-import { AcademyFeesPage } from '../pages/AcademyFeesPage';
+import { AcademyFeesPage, StudentFeesPage } from '../pages/AcademyFeesPage';
 import { AcademyInvitesPage } from '../pages/AcademyInvitesPage';
 import { AcademyProgressPage, CoachProgressPage, StudentProgressPage } from '../pages/AcademyProgressPage';
 import { AcademySettingsPage } from '../pages/AcademySettingsPage';
 import { AcademyStudentsPage } from '../pages/AcademyStudentsPage';
-import { AttendancePage } from '../pages/AttendancePage';
-import { BatchesPage } from '../pages/BatchesPage';
-import { CoachesPage } from '../pages/CoachesPage';
+import { CoachBatchesPage } from '../pages/CoachBatchesPage';
 import { CoachDashboard } from '../pages/CoachDashboard';
+import { CoachProfilePage } from '../pages/CoachProfilePage';
+import { CoachStudentsPage } from '../pages/CoachStudentsPage';
 import { DashboardRedirect } from '../pages/DashboardRedirect';
-import { FeesPage } from '../pages/FeesPage';
+import { HomeworkPage } from '../pages/HomeworkPage';
 import { LandingPage } from '../pages/LandingPage';
 import { JoinInviteLookup } from '../pages/JoinInviteLookup';
 import { JoinInvitePage } from '../pages/JoinInvitePage';
 import { LoginPage } from '../pages/LoginPage';
 import { Onboarding } from '../pages/Onboarding';
 import { PendingApproval } from '../pages/PendingApproval';
-import { ParentDashboard } from '../pages/ParentDashboard';
-import { ReportsPage } from '../pages/ReportsPage';
 import { SettingsPage } from '../pages/SettingsPage';
-import { StudentProfilePage } from '../pages/StudentProfilePage';
 import { StudentDashboard } from '../pages/StudentDashboard';
-import { StudentsPage } from '../pages/StudentsPage';
+import { StudentProfileSettingsPage } from '../pages/StudentProfileSettingsPage';
+import { StudentSectionPage } from '../pages/StudentSectionPage';
 import { SuperAdminAcademiesPage } from '../pages/SuperAdminAcademiesPage';
 import { SuperAdminAcademyDetailPage } from '../pages/SuperAdminAcademyDetailPage';
 import { SuperAdminApprovalsPage } from '../pages/SuperAdminApprovalsPage';
@@ -62,27 +60,28 @@ export function AppRoutes() {
         <Route path="/academy/attendance" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyAttendancePage /></ProtectedRoute>} />
         <Route path="/academy/class-reports" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyClassReportsPage /></ProtectedRoute>} />
         <Route path="/academy/progress" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyProgressPage /></ProtectedRoute>} />
+        <Route path="/academy/homework" element={<ProtectedRoute allowedRoles={['academy_admin']}><HomeworkPage mode="academy" /></ProtectedRoute>} />
         <Route path="/academy/fees" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyFeesPage /></ProtectedRoute>} />
         <Route path="/academy/invites" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyInvitesPage /></ProtectedRoute>} />
         <Route path="/academy/settings" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademySettingsPage /></ProtectedRoute>} />
         <Route path="/coach" element={<ProtectedRoute allowedRoles={['coach']}><CoachDashboard /></ProtectedRoute>} />
+        <Route path="/coach/batches" element={<ProtectedRoute allowedRoles={['coach']}><CoachBatchesPage /></ProtectedRoute>} />
+        <Route path="/coach/students" element={<ProtectedRoute allowedRoles={['coach']}><CoachStudentsPage /></ProtectedRoute>} />
         <Route path="/coach/attendance" element={<ProtectedRoute allowedRoles={['coach']}><CoachAttendancePage /></ProtectedRoute>} />
         <Route path="/coach/class-reports" element={<ProtectedRoute allowedRoles={['coach']}><CoachClassReportsPage /></ProtectedRoute>} />
         <Route path="/coach/progress" element={<ProtectedRoute allowedRoles={['coach']}><CoachProgressPage /></ProtectedRoute>} />
-        <Route path="/parent" element={<ProtectedRoute allowedRoles={['parent']}><ParentDashboard /></ProtectedRoute>} />
+        <Route path="/coach/homework" element={<ProtectedRoute allowedRoles={['coach']}><HomeworkPage mode="coach" /></ProtectedRoute>} />
+        <Route path="/coach/profile" element={<ProtectedRoute allowedRoles={['coach']}><CoachProfilePage /></ProtectedRoute>} />
         <Route path="/student" element={<ProtectedRoute allowedRoles={['student']}><StudentDashboard /></ProtectedRoute>} />
+        <Route path="/student/attendance" element={<ProtectedRoute allowedRoles={['student']}><StudentSectionPage section="attendance" /></ProtectedRoute>} />
+        <Route path="/student/class-reports" element={<ProtectedRoute allowedRoles={['student']}><StudentSectionPage section="classReports" /></ProtectedRoute>} />
         <Route path="/student/progress" element={<ProtectedRoute allowedRoles={['student']}><StudentProgressPage /></ProtectedRoute>} />
+        <Route path="/student/fees" element={<ProtectedRoute allowedRoles={['student']}><StudentFeesPage /></ProtectedRoute>} />
+        <Route path="/student/profile" element={<ProtectedRoute allowedRoles={['student']}><StudentProfileSettingsPage /></ProtectedRoute>} />
+        <Route path="/student/homework" element={<ProtectedRoute allowedRoles={['student']}><HomeworkPage mode="student" /></ProtectedRoute>} />
         <Route path="/onboarding" element={<ProtectedRoute allowedRoles={['unassigned']}><Onboarding /></ProtectedRoute>} />
         <Route path="/pending-approval" element={<ProtectedRoute allowedRoles={['unassigned']} allowedStatuses={['pending']}><PendingApproval /></ProtectedRoute>} />
         <Route path="/dashboard" element={<DashboardRedirect />} />
-        <Route path="/students" element={<ProtectedRoute allowedRoles={['coach']}><StudentsPage /></ProtectedRoute>} />
-        <Route path="/students/:studentId" element={<ProtectedRoute allowedRoles={['coach', 'student', 'parent']}><StudentProfilePage /></ProtectedRoute>} />
-        <Route path="/batches" element={<ProtectedRoute allowedRoles={['coach']}><BatchesPage /></ProtectedRoute>} />
-        <Route path="/coaches" element={<ProtectedRoute allowedRoles={['coach']}><CoachesPage /></ProtectedRoute>} />
-        <Route path="/attendance" element={<ProtectedRoute allowedRoles={['coach']}><AttendancePage /></ProtectedRoute>} />
-        <Route path="/reports" element={<ProtectedRoute allowedRoles={['coach', 'student', 'parent']}><ReportsPage /></ProtectedRoute>} />
-        <Route path="/fees" element={<ProtectedRoute allowedRoles={['parent']}><FeesPage /></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute allowedRoles={['super_admin', 'coach', 'student', 'parent']}><SettingsPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

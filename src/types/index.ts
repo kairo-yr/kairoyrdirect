@@ -10,7 +10,7 @@ export type BatchMode = 'online' | 'offline' | 'hybrid';
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 export type ClassReportStatus = 'draft' | 'completed' | 'shared';
 export type StudentPerformance = 'excellent' | 'good' | 'needs_practice' | 'absent' | 'not_observed';
-export type RoadmapStatus = 'Mock Data' | 'Coming Soon' | 'Phase 2' | 'Phase 3' | 'Phase 4' | 'Phase 5' | 'Phase 6' | 'Future Integration';
+export type RoadmapStatus = 'Coming Soon' | 'Phase 2' | 'Phase 3' | 'Phase 4' | 'Phase 5' | 'Phase 6' | 'Beta' | 'V1 Placeholder' | 'Future Integration';
 
 export type Status =
   | EntityStatus

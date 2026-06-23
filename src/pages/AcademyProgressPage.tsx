@@ -39,6 +39,7 @@ type BatchRecord = {
 type StudentRecord = {
   id: string;
   name: string;
+  batchId?: string | null;
   status?: string;
 };
 
@@ -68,6 +69,7 @@ type ProgressReport = {
 
 type AttendanceRecord = {
   id: string;
+  batchId?: string;
   students?: Array<{ studentId?: string; status?: string }>;
   entries?: Array<{ studentId?: string; status?: string }>;
 };
@@ -182,6 +184,15 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
       setProgressReports(progressSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressReport).sort((a, b) => b.date.localeCompare(a.date)));
       return;
     }
+    if (isCoachMode) {
+      const reports = new Map<string, ProgressReport>();
+      for (const student of visibleStudents) {
+        const progressSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'progressReports'), where('studentId', '==', student.id)));
+        progressSnapshot.docs.forEach((docSnap) => reports.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ProgressReport));
+      }
+      setProgressReports(Array.from(reports.values()).sort((a, b) => b.date.localeCompare(a.date)));
+      return;
+    }
     const progressSnapshot = await getDocs(collection(db, 'academies', academyId, 'progressReports'));
     const visibleStudentIds = new Set(visibleStudents.map((student) => student.id));
     setProgressReports(
@@ -200,20 +211,48 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
       }
       setLoading(true);
       try {
-        const [batchSnapshot, studentSnapshot, attendanceSnapshot] = await Promise.all([
-          getDocs(collection(db, 'academies', academyId, 'batches')),
-          isStudentMode && linkedStudentId
-            ? getDoc(doc(db, 'academies', academyId, 'students', linkedStudentId))
-            : getDocs(collection(db, 'academies', academyId, 'students')),
-          getDocs(collection(db, 'academies', academyId, 'attendance')),
+        if (isStudentMode && linkedStudentId) {
+          const studentSnapshot = await getDoc(doc(db, 'academies', academyId, 'students', linkedStudentId));
+          const loadedStudent = studentSnapshot.exists() ? ({ id: studentSnapshot.id, ...studentSnapshot.data() } as StudentRecord) : null;
+          const [batchSnapshot, attendanceSnapshot, presentSnapshot, absentSnapshot] = await Promise.all([
+            getDocs(query(collection(db, 'academies', academyId, 'batches'), where('studentIds', 'array-contains', linkedStudentId))),
+            getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('studentIds', 'array-contains', linkedStudentId))),
+            getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsPresentIds', 'array-contains', linkedStudentId))),
+            getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsAbsentIds', 'array-contains', linkedStudentId))),
+          ]);
+          const loadedBatches = batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord);
+          const reports = new Map<string, ClassReportRecord>();
+          [...presentSnapshot.docs, ...absentSnapshot.docs].forEach((docSnap) => {
+            reports.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ClassReportRecord);
+          });
+
+          setBatches(loadedBatches);
+          setStudents(loadedStudent && loadedStudent.status !== 'disabled' ? [loadedStudent] : []);
+          setAttendanceRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord));
+          setSelectedStudentId(loadedStudent?.id ?? '');
+          setClassReports(Array.from(reports.values()).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))));
+          await loadProgress(loadedStudent ? [loadedStudent] : []);
+          return;
+        }
+
+        const [batchSnapshot, attendanceSnapshot] = await Promise.all([
+          isCoachMode && linkedCoachId
+            ? getDocs(query(collection(db, 'academies', academyId, 'batches'), where('coachId', '==', linkedCoachId)))
+            : getDocs(collection(db, 'academies', academyId, 'batches')),
+          isCoachMode && linkedCoachId
+            ? getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', linkedCoachId)))
+            : getDocs(collection(db, 'academies', academyId, 'attendance')),
         ]);
         const activeBatches = batchSnapshot.docs
           .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
           .filter((batch) => batch.status === 'active')
           .filter((batch) => !isCoachMode || batch.coachId === linkedCoachId);
         const visibleStudentIds = new Set(activeBatches.flatMap((batch) => batch.studentIds));
-        const studentDocs = 'docs' in studentSnapshot ? studentSnapshot.docs : studentSnapshot.exists() ? [studentSnapshot] : [];
+        const studentDocs = isCoachMode
+          ? await Promise.all(Array.from(visibleStudentIds).map((studentId) => getDoc(doc(db, 'academies', academyId, 'students', studentId))))
+          : (await getDocs(collection(db, 'academies', academyId, 'students'))).docs;
         const loadedStudents = studentDocs
+          .filter((docSnap) => docSnap.exists())
           .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
           .filter((student) => student.status !== 'disabled')
           .filter((student) => {
@@ -223,20 +262,19 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
           });
         setBatches(activeBatches);
         setStudents(loadedStudents);
-        setAttendanceRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord));
+        const activeBatchIds = new Set(activeBatches.map((batch) => batch.id));
+        const visibleStudentIdsForAttendance = new Set(activeBatches.flatMap((batch) => batch.studentIds));
+        setAttendanceRecords(
+          attendanceSnapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
+            .filter((record) =>
+              !isCoachMode
+              || Boolean(record.batchId && activeBatchIds.has(record.batchId))
+              || [...(record.students ?? []), ...(record.entries ?? [])].some((entry) => entry.studentId && visibleStudentIdsForAttendance.has(entry.studentId)),
+            ),
+        );
         setSelectedStudentId((current) => current || loadedStudents[0]?.id || '');
         await loadProgress(loadedStudents);
-        if (isStudentMode && linkedStudentId) {
-          const [presentSnapshot, absentSnapshot] = await Promise.all([
-            getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsPresentIds', 'array-contains', linkedStudentId))),
-            getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsAbsentIds', 'array-contains', linkedStudentId))),
-          ]);
-          const reports = new Map<string, ClassReportRecord>();
-          [...presentSnapshot.docs, ...absentSnapshot.docs].forEach((docSnap) => {
-            reports.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ClassReportRecord);
-          });
-          setClassReports(Array.from(reports.values()).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))));
-        }
       } finally {
         setLoading(false);
       }
@@ -416,7 +454,7 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
   }
 
   if (isStudentMode && !linkedStudentId) {
-    return <EmptyState title="No student profile linked yet" description="Accept a student invite before viewing progress." />;
+    return <EmptyState title="Your student profile is not linked yet" description="Contact your academy." />;
   }
 
   return (

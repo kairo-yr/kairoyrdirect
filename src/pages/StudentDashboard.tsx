@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
-import { BarChart3, BookOpen, CalendarCheck, ClipboardList } from 'lucide-react';
+import { BarChart3, BookOpen, CalendarCheck, ClipboardList, Gamepad2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatCard } from '../components/ui/StatCard';
@@ -12,12 +12,18 @@ import { RoleDashboard } from './RoleDashboard';
 type StudentProfile = {
   id: string;
   name?: string;
-  batchId?: string;
   progress?: number;
+};
+
+type BatchRecord = {
+  id: string;
+  name?: string;
+  studentIds?: string[];
 };
 
 type AttendanceRecord = {
   id: string;
+  studentIds?: string[];
   entries?: Array<{ studentId?: string; status?: string }>;
   students?: Array<{ studentId?: string; status?: string }>;
 };
@@ -42,33 +48,23 @@ type ProgressRecord = {
   nextFocus?: string;
 };
 
-type FeeRecord = {
+type HomeworkRecord = {
   id: string;
-  month?: string;
-  amount?: number;
-  paidAmount?: number;
+  title?: string;
+  dueDate?: string | null;
   status?: string;
-  dueDate?: string;
-  paidDate?: string | null;
+  batchId?: string | null;
+  studentIds?: string[];
 };
-
-function getCurrentMonth() {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('en-IN', { currency: 'INR', maximumFractionDigits: 0, style: 'currency' }).format(value);
-}
 
 export function StudentDashboard() {
   const { userProfile } = useAuth();
   const [student, setStudent] = useState<StudentProfile | null>(null);
+  const [batches, setBatches] = useState<BatchRecord[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [classReports, setClassReports] = useState<ClassReportRecord[]>([]);
   const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
-  const [feeRecords, setFeeRecords] = useState<FeeRecord[]>([]);
-  const [batchName, setBatchName] = useState('');
+  const [homeworkRecords, setHomeworkRecords] = useState<HomeworkRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const academyId = userProfile?.academyId;
@@ -84,18 +80,22 @@ export function StudentDashboard() {
       try {
         const studentSnapshot = await getDoc(doc(db, 'academies', academyId, 'students', linkedStudentId));
         const loadedStudent = studentSnapshot.exists() ? ({ id: studentSnapshot.id, ...studentSnapshot.data() } as StudentProfile) : null;
-        const [attendanceSnapshot, presentReportSnapshot, absentReportSnapshot, progressSnapshot, feeSnapshot] = await Promise.all([
-          getDocs(collection(db, 'academies', academyId, 'attendance')),
+        const [batchSnapshot, attendanceSnapshot, presentReportSnapshot, absentReportSnapshot, progressSnapshot, homeworkSnapshot] = await Promise.all([
+          getDocs(query(collection(db, 'academies', academyId, 'batches'), where('studentIds', 'array-contains', linkedStudentId))),
+          getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('studentIds', 'array-contains', linkedStudentId))),
           getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsPresentIds', 'array-contains', linkedStudentId))),
           getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsAbsentIds', 'array-contains', linkedStudentId))),
           getDocs(query(collection(db, 'academies', academyId, 'progressReports'), where('studentId', '==', linkedStudentId))),
-          getDocs(query(collection(db, 'academies', academyId, 'fees'), where('studentId', '==', linkedStudentId))),
+          getDocs(query(collection(db, 'academies', academyId, 'homework'), where('studentIds', 'array-contains', linkedStudentId))),
         ]);
+        const loadedBatches = batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord);
+        const assignedBatchIds = new Set(loadedBatches.map((batch) => batch.id));
         const reportMap = new Map<string, ClassReportRecord>();
         [...presentReportSnapshot.docs, ...absentReportSnapshot.docs].forEach((docSnap) => {
           reportMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ClassReportRecord);
         });
         setStudent(loadedStudent);
+        setBatches(loadedBatches);
         setAttendanceRecords(
           attendanceSnapshot.docs
             .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
@@ -115,15 +115,12 @@ export function StudentDashboard() {
             .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressRecord)
             .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))),
         );
-        setFeeRecords(
-          feeSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as FeeRecord)
-            .sort((a, b) => String(b.month ?? '').localeCompare(String(a.month ?? ''))),
+        setHomeworkRecords(
+          homeworkSnapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as HomeworkRecord)
+            .filter((record) => record.status === 'active' && ((record.studentIds ?? []).includes(linkedStudentId) || Boolean(record.batchId && assignedBatchIds.has(record.batchId))))
+            .sort((a, b) => String(a.dueDate ?? '9999-12-31').localeCompare(String(b.dueDate ?? '9999-12-31'))),
         );
-        if (loadedStudent?.batchId) {
-          const batchSnapshot = await getDoc(doc(db, 'academies', academyId, 'batches', loadedStudent.batchId));
-          setBatchName(batchSnapshot.exists() ? String(batchSnapshot.data().name ?? 'Assigned batch') : '');
-        }
       } finally {
         setLoading(false);
       }
@@ -144,49 +141,43 @@ export function StudentDashboard() {
   }, [attendanceRecords, linkedStudentId]);
   const latestReport = classReports[0];
   const latestProgress = progressRecords[0];
-  const currentFee = feeRecords.find((record) => record.month === getCurrentMonth());
-  const pendingBalance = feeRecords.reduce((total, record) => total + Math.max(0, Number(record.amount ?? 0) - Number(record.paidAmount ?? 0)), 0);
+  const nextHomework = homeworkRecords[0];
+  const batchNames = batches.map((batch) => batch.name || 'Untitled batch');
+  const assignedBatchLabel = batchNames.join(', ') || 'Not assigned';
 
   return (
     <div className="space-y-6">
       <RoleDashboard
         title="Student Dashboard"
         role="student"
-        description="Views homework, assigned chess practice, reports, and the future access path to Kairoyr Play."
+        description="Track attendance, class reports, progress, homework, and fees."
       />
 
       {!linkedStudentId ? (
-        <EmptyState title="No student profile linked yet" description="Accept a student invite to link this account with an academy student profile." />
+        <EmptyState title="Your student profile is not linked yet" description="Contact your academy." />
       ) : (
         <>
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="text-xs font-black uppercase tracking-wide text-slate-400">Student</div>
+                <h2 className="mt-1 text-2xl font-black text-navy">{student?.name || userProfile?.name || 'Student'}</h2>
+                <p className="mt-2 text-sm font-semibold text-slate-500">{assignedBatchLabel}</p>
+              </div>
+              <Link className="inline-flex items-center gap-2 rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white" to="/student/homework">
+                <Gamepad2 size={18} /> {PLAY_APP_NAME}
+              </Link>
+            </div>
+          </section>
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Classes Attended" value={loading ? '...' : String(attendanceStats.total)} helper={attendanceStats.total ? 'Attendance entries found' : 'No attendance records yet'} icon={CalendarCheck} />
             <StatCard label="Attendance" value={attendanceStats.percentage === null ? 'No data' : `${attendanceStats.percentage}%`} helper="Based on this student only" icon={BarChart3} />
-            <StatCard label="Assigned Batch" value={batchName || 'No data'} helper={student?.batchId ? 'Batch linked' : 'No assigned batch yet'} icon={ClipboardList} />
+            <StatCard label="Assigned Batch" value={assignedBatchLabel} helper={batches.length > 1 ? `${batches.length} assigned batches` : 'From batch membership'} icon={ClipboardList} />
             <StatCard label="Progress" value={latestProgress?.ratings?.overall ? `${latestProgress.ratings.overall}/5` : 'No data'} helper={latestProgress?.nextFocus || 'No progress updates yet'} icon={BookOpen} />
+            <StatCard label="Active Homework" value={loading ? '...' : String(homeworkRecords.length)} helper="Practice tasks" icon={Gamepad2} />
+            <StatCard label="Next Due" value={nextHomework?.dueDate ?? 'No data'} helper={nextHomework?.title ?? 'No active homework'} icon={Gamepad2} />
           </div>
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
-            <h2 className="text-xl font-black text-navy">Fee Status</h2>
-            {feeRecords.length === 0 ? (
-              <EmptyState title="No fee records yet" description="Fee status will appear here when your academy generates monthly fees." />
-            ) : (
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <div className="text-xs font-black uppercase tracking-wide text-slate-400">Current Month</div>
-                  <div className="mt-1 font-black text-navy">{currentFee?.status ?? 'No record'}</div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <div className="text-xs font-black uppercase tracking-wide text-slate-400">Pending Balance</div>
-                  <div className="mt-1 font-black text-navy">{formatCurrency(pendingBalance)}</div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <div className="text-xs font-black uppercase tracking-wide text-slate-400">Payment History</div>
-                  <div className="mt-1 font-black text-navy">{feeRecords.length} records</div>
-                </div>
-              </div>
-            )}
-          </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -220,7 +211,12 @@ export function StudentDashboard() {
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
             <h2 className="text-xl font-black text-navy">Homework / Practice</h2>
-            {latestReport?.homeworkGiven || latestReport?.homework ? (
+            {nextHomework ? (
+              <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+                <p className="text-sm leading-6 text-slate-600">{nextHomework.title} · {nextHomework.dueDate ?? 'No due date'}</p>
+                <Link className="rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white" to="/student/homework">View Homework</Link>
+              </div>
+            ) : latestReport?.homeworkGiven || latestReport?.homework ? (
               <p className="mt-3 text-sm leading-6 text-slate-600">{latestReport.homeworkGiven ?? latestReport.homework}</p>
             ) : (
               <EmptyState title="No progress updates yet" description={`Homework and ${PLAY_APP_NAME} practice access will appear when available.`} />

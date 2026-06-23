@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { CalendarCheck, ClipboardList, FileText, GraduationCap } from 'lucide-react';
+import { BookOpen, CalendarCheck, ClipboardList, FileText, GraduationCap } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -46,6 +46,15 @@ type ProgressRecord = {
   ratings?: { overall?: number; calculation?: number; homework?: number };
 };
 
+type HomeworkRecord = {
+  id: string;
+  createdByUid?: string;
+  batchId?: string | null;
+  studentIds?: string[];
+  dueDate?: string | null;
+  status?: string;
+};
+
 export function CoachDashboard() {
   const { userProfile } = useAuth();
   const [batches, setBatches] = useState<BatchRecord[]>([]);
@@ -53,6 +62,7 @@ export function CoachDashboard() {
   const [classRecords, setClassRecords] = useState<ClassRecord[]>([]);
   const [reports, setReports] = useState<ClassReportRecord[]>([]);
   const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
+  const [homeworkRecords, setHomeworkRecords] = useState<HomeworkRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const academyId = userProfile?.academyId;
@@ -66,31 +76,42 @@ export function CoachDashboard() {
       }
       setLoading(true);
       try {
-        const [batchSnapshot, studentSnapshot, attendanceSnapshot, reportSnapshot, progressSnapshot] = await Promise.all([
-          getDocs(collection(db, 'academies', academyId, 'batches')),
+        const [batchSnapshot, studentSnapshot, attendanceSnapshot, reportSnapshot] = await Promise.all([
+          getDocs(query(collection(db, 'academies', academyId, 'batches'), where('coachId', '==', linkedCoachId))),
           getDocs(collection(db, 'academies', academyId, 'students')),
           getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', linkedCoachId))),
           getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('coachId', '==', linkedCoachId))),
-          getDocs(collection(db, 'academies', academyId, 'progressReports')),
         ]);
-        const assignedBatches = batchSnapshot.docs
-          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
-          .filter((batch) => batch.coachId === linkedCoachId || batch.assignedCoachId === linkedCoachId);
+        const assignedBatches = batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord);
         const assignedBatchIds = new Set(assignedBatches.map((batch) => batch.id));
         setBatches(assignedBatches);
         const assignedStudentIds = new Set(assignedBatches.flatMap((batch) => batch.studentIds ?? []));
         setStudents(
           studentSnapshot.docs
             .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
-            .filter((student) => assignedStudentIds.has(student.id) || Boolean(student.batchId && assignedBatchIds.has(student.batchId))),
+            .filter((student) => assignedStudentIds.has(student.id)),
         );
         setClassRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ClassRecord));
         setReports(reportSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ClassReportRecord));
-        setProgressRecords(
-          progressSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressRecord)
-            .filter((record) => Boolean(record.studentId && assignedStudentIds.has(record.studentId))),
-        );
+        const progressMap = new Map<string, ProgressRecord>();
+        for (const studentId of assignedStudentIds) {
+          const progressSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'progressReports'), where('studentId', '==', studentId)));
+          progressSnapshot.docs.forEach((docSnap) => progressMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ProgressRecord));
+        }
+        setProgressRecords(Array.from(progressMap.values()));
+
+        const homeworkMap = new Map<string, HomeworkRecord>();
+        const ownHomeworkSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'homework'), where('createdByUid', '==', userProfile?.uid ?? '')));
+        ownHomeworkSnapshot.docs.forEach((docSnap) => homeworkMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as HomeworkRecord));
+        for (const batchId of assignedBatchIds) {
+          const batchHomeworkSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'homework'), where('batchId', '==', batchId)));
+          batchHomeworkSnapshot.docs.forEach((docSnap) => homeworkMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as HomeworkRecord));
+        }
+        for (const studentId of assignedStudentIds) {
+          const studentHomeworkSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'homework'), where('studentIds', 'array-contains', studentId)));
+          studentHomeworkSnapshot.docs.forEach((docSnap) => homeworkMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as HomeworkRecord));
+        }
+        setHomeworkRecords(Array.from(homeworkMap.values()));
       } finally {
         setLoading(false);
       }
@@ -109,6 +130,12 @@ export function CoachDashboard() {
     const ratings = record.ratings;
     return Number(ratings?.overall ?? 5) <= 2 || Number(ratings?.calculation ?? 5) <= 2 || Number(ratings?.homework ?? 5) <= 2;
   }).length;
+  const homeworkByCoach = homeworkRecords.filter((record) => record.createdByUid === userProfile?.uid && record.status === 'active').length;
+  const today = new Date().toISOString().slice(0, 10);
+  const weekEnd = new Date();
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  const weekEndString = weekEnd.toISOString().slice(0, 10);
+  const homeworkDueThisWeek = homeworkRecords.filter((record) => record.status === 'active' && String(record.dueDate ?? '') >= today && String(record.dueDate ?? '') <= weekEndString).length;
 
   return (
     <div className="space-y-6">
@@ -119,25 +146,28 @@ export function CoachDashboard() {
       />
 
       {!linkedCoachId ? (
-        <EmptyState title="No coach profile linked yet" description="Accept a coach invite to link this account with an academy coach profile." />
+        <EmptyState title="Your coach profile is not linked yet" description="Contact your academy." />
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Assigned Students" value={loading ? '...' : String(students.length)} helper="Only students in assigned batches" icon={GraduationCap} />
             <StatCard label="Assigned Batches" value={loading ? '...' : String(batches.length)} helper="Coach-scoped batches" icon={ClipboardList} />
-            <StatCard label="Classes Taken" value={loading ? '...' : String(classRecords.length)} helper="Attendance records" icon={CalendarCheck} />
+            <StatCard label="Attendance Records" value={loading ? '...' : String(classRecords.length)} helper="Submitted for assigned batches" icon={CalendarCheck} />
             <StatCard label="Reports Created" value={loading ? '...' : String(reports.length)} helper={`${reports.filter((report) => report.status === 'draft').length} drafts`} icon={FileText} />
             <StatCard label="Need Attention" value={loading ? '...' : String(studentsNeedingAttention)} helper="Assigned students" icon={GraduationCap} />
             <StatCard label="Progress Updates" value={loading ? '...' : String(progressRecords.length)} helper="Assigned students" icon={GraduationCap} />
             <StatCard label="Without Progress" value={loading ? '...' : String(students.filter((student) => !latestProgressByStudent.has(student.id)).length)} helper="Need first update" icon={GraduationCap} />
-            <StatCard label="Next Class" value={nextClass?.name ?? 'No data'} helper={nextClass?.startTime ? `${nextClass.startTime} - ${nextClass.endTime ?? ''}` : 'No batch schedule yet'} icon={FileText} />
+            <StatCard label="Upcoming Classes" value={nextClass?.name ?? 'No data'} helper={nextClass?.startTime ? `${nextClass.startTime} - ${nextClass.endTime ?? ''}` : 'No batch schedule yet'} icon={FileText} />
+            <StatCard label="Homework Assigned" value={loading ? '...' : String(homeworkByCoach)} helper="Created by you" icon={BookOpen} />
+            <StatCard label="Homework Due" value={loading ? '...' : String(homeworkDueThisWeek)} helper="Due this week" icon={BookOpen} />
           </div>
 
           <div className="flex flex-wrap gap-3">
             <Link className="rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white" to="/coach/attendance">Mark Attendance</Link>
             <Link className="rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white" to="/coach/class-reports">Write Class Report</Link>
             <Link className="rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white" to="/coach/progress">Update Progress</Link>
-            <Link className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-navy" to="/students">View Students</Link>
+            <Link className="rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white" to="/coach/homework">Assign Homework</Link>
+            <Link className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-navy" to="/coach/students">View My Students</Link>
           </div>
 
           <section>

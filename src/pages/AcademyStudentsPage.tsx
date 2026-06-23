@@ -19,10 +19,19 @@ type StudentForm = {
   name: string;
   email: string;
   phone: string;
+  guardianName: string;
+  guardianPhone: string;
+  guardianEmail: string;
   monthlyFee: string;
 };
 
-const initialForm: StudentForm = { name: '', email: '', phone: '', monthlyFee: '' };
+type BatchRecord = {
+  id: string;
+  name?: string;
+  studentIds?: string[];
+};
+
+const initialForm: StudentForm = { name: '', email: '', phone: '', guardianName: '', guardianPhone: '', guardianEmail: '', monthlyFee: '' };
 
 function statusClass(status: string) {
   if (status === 'active') return statusStyles.active;
@@ -39,6 +48,7 @@ export function AcademyStudentsPage() {
   const { userProfile } = useAuth();
   const academyId = userProfile?.academyId;
   const [students, setStudents] = useState<AcademyStudentProfile[]>([]);
+  const [batches, setBatches] = useState<BatchRecord[]>([]);
   const [invites, setInvites] = useState<AcademyInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -56,11 +66,13 @@ export function AcademyStudentsPage() {
       return;
     }
     setLoading(true);
-    const [studentSnapshot, inviteSnapshot] = await Promise.all([
+    const [studentSnapshot, batchSnapshot, inviteSnapshot] = await Promise.all([
       getDocs(collection(db, 'academies', academyId, 'students')),
+      getDocs(collection(db, 'academies', academyId, 'batches')),
       getDocs(query(collection(db, 'academyInvites'), where('academyId', '==', academyId))),
     ]);
     setStudents(studentSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyStudentProfile));
+    setBatches(batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord));
     setInvites(inviteSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyInvite));
     setLoading(false);
   };
@@ -70,6 +82,17 @@ export function AcademyStudentsPage() {
   }, [academyId, userProfile?.role]);
 
   const updateField = (field: keyof StudentForm, value: string) => setForm((current) => ({ ...current, [field]: value }));
+
+  const getAssignedBatchNames = (student: AcademyStudentProfile) => batches
+    .filter((batch) => Array.isArray(batch.studentIds) && batch.studentIds.includes(student.id))
+    .map((batch) => batch.name || 'Untitled batch');
+
+  const formatAssignedBatches = (student: AcademyStudentProfile) => {
+    const names = getAssignedBatchNames(student);
+    if (names.length === 0) return 'Not assigned';
+    if (names.length === 1) return names[0];
+    return `${names.length} batches`;
+  };
 
   const openAddModal = () => {
     setEditing(null);
@@ -83,6 +106,9 @@ export function AcademyStudentsPage() {
       name: student.name,
       email: student.email ?? '',
       phone: student.phone ?? '',
+      guardianName: student.guardianName ?? student.parentName ?? '',
+      guardianPhone: student.guardianPhone ?? student.parentPhone ?? '',
+      guardianEmail: student.guardianEmail ?? student.parentEmail ?? '',
       monthlyFee: student.monthlyFee === null || student.monthlyFee === undefined ? '' : String(student.monthlyFee),
     });
     setModalOpen(true);
@@ -110,6 +136,12 @@ export function AcademyStudentsPage() {
           name: form.name.trim(),
           phone: form.phone.trim(),
           email: normalizedEmail,
+          parentName: form.guardianName.trim(),
+          parentEmail: form.guardianEmail.trim().toLowerCase(),
+          parentPhone: form.guardianPhone.trim(),
+          guardianName: form.guardianName.trim(),
+          guardianEmail: form.guardianEmail.trim().toLowerCase(),
+          guardianPhone: form.guardianPhone.trim(),
           monthlyFee,
           updatedAt: serverTimestamp(),
         });
@@ -124,6 +156,9 @@ export function AcademyStudentsPage() {
           name: form.name.trim(),
           email: form.email.trim(),
           phone: form.phone.trim(),
+          guardianName: form.guardianName.trim(),
+          guardianPhone: form.guardianPhone.trim(),
+          guardianEmail: form.guardianEmail.trim(),
           monthlyFee,
         });
         setMessage(invite ? `Student invite created: ${academyInviteLink('student', invite.inviteToken)}` : 'Student added. Add an email later to generate an invite link.');
@@ -183,7 +218,7 @@ export function AcademyStudentsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Academy Students"
-        description="Manage invited and active students for your academy only."
+        description="Manage student profiles and guardian / contact details for your academy only."
         action={<button className="inline-flex items-center gap-2 rounded-2xl bg-directBlue px-4 py-3 text-sm font-black text-white" onClick={openAddModal} type="button"><Plus size={18} /> Add Student</button>}
       />
       {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</div> : null}
@@ -193,16 +228,18 @@ export function AcademyStudentsPage() {
       ) : students.length === 0 ? (
         <EmptyState title="No students added yet" description="Add your first student." />
       ) : (
-        <DataTable columns={['Name', 'Email', 'Phone', 'Status', 'Batch', 'Created', 'Actions']}>
+        <DataTable columns={['Name', 'Login Email', 'Phone', 'Guardian / Contact', 'Status', 'Batch', 'Created', 'Actions']}>
           {students.map((student) => {
             const invite = student.inviteId ? inviteById.get(student.inviteId) : undefined;
+            const assignedBatchNames = getAssignedBatchNames(student);
             return (
               <tr className="border-t border-slate-100" key={student.id}>
                 <td className="px-5 py-4 font-black text-navy">{student.name}</td>
                 <td className="px-5 py-4 text-slate-600">{student.email || 'Not added'}</td>
                 <td className="px-5 py-4 text-slate-600">{student.phone || 'Not added'}</td>
+                <td className="px-5 py-4 text-slate-600">{student.guardianName || student.parentName || 'Not added'}</td>
                 <td className="px-5 py-4"><Badge className={statusClass(student.status)}>{statusLabel(student.status)}</Badge></td>
-                <td className="px-5 py-4 text-slate-600">{'batchId' in student && student.batchId ? String(student.batchId) : 'Not assigned'}</td>
+                <td className="px-5 py-4 text-slate-600" title={assignedBatchNames.join(', ') || undefined}>{formatAssignedBatches(student)}</td>
                 <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(student.createdAt)}</td>
                 <td className="px-5 py-4">
                   <div className="flex flex-wrap gap-2">
@@ -221,11 +258,19 @@ export function AcademyStudentsPage() {
           })}
         </DataTable>
       )}
-      <Modal title={editing ? 'Edit Student' : 'Add Student'} description={editing ? 'Update safe student profile fields.' : 'Creates a student profile. Email is optional for invite generation.'} open={modalOpen} onClose={() => setModalOpen(false)}>
+      <Modal title={editing ? 'Edit Student' : 'Add Student'} description={editing ? 'Update safe student profile fields.' : 'Creates a student profile. Login email is optional until you send an invite.'} open={modalOpen} onClose={() => setModalOpen(false)}>
         <form className="grid gap-4" onSubmit={handleSubmit}>
           <FormInput label="Student name" value={form.name} onChange={(event) => updateField('name', event.target.value)} />
           <FormInput label="Phone number" value={form.phone} onChange={(event) => updateField('phone', event.target.value)} />
-          <FormInput label="Email optional" type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} />
+          <FormInput label="Email / login email optional" type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} />
+          <div className="rounded-2xl border border-slate-200 p-4">
+            <h3 className="text-sm font-black text-navy">Guardian / Contact Details</h3>
+            <div className="mt-4 grid gap-4">
+              <FormInput label="Guardian name optional" value={form.guardianName} onChange={(event) => updateField('guardianName', event.target.value)} />
+              <FormInput label="Guardian phone optional" value={form.guardianPhone} onChange={(event) => updateField('guardianPhone', event.target.value)} />
+              <FormInput label="Guardian email optional" type="email" value={form.guardianEmail} onChange={(event) => updateField('guardianEmail', event.target.value)} />
+            </div>
+          </div>
           <FormInput label="Monthly fee optional" min="0" type="number" value={form.monthlyFee} onChange={(event) => updateField('monthlyFee', event.target.value)} />
           <div className="flex justify-end gap-3">
             <button className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-black text-slate-600" type="button" onClick={() => setModalOpen(false)}>Cancel</button>
@@ -238,10 +283,13 @@ export function AcademyStudentsPage() {
           <div className="grid gap-3 text-sm">
             {[
               ['Student name', viewing.name],
-              ['Email', viewing.email || 'Not added'],
+              ['Email / login email', viewing.email || 'Not added'],
               ['Phone number', viewing.phone || 'Not added'],
+              ['Guardian / contact name', viewing.guardianName || viewing.parentName || 'Not added'],
+              ['Guardian / contact phone', viewing.guardianPhone || viewing.parentPhone || 'Not added'],
+              ['Guardian / contact email', viewing.guardianEmail || viewing.parentEmail || 'Not added'],
               ['Status', statusLabel(viewing.status)],
-              ['Batch assignment', 'batchId' in viewing && viewing.batchId ? String(viewing.batchId) : 'Not assigned'],
+              ['Batch assignment', getAssignedBatchNames(viewing).join(', ') || 'Not assigned'],
               ['Monthly fee', viewing.monthlyFee === null || viewing.monthlyFee === undefined ? 'Not set' : `₹${viewing.monthlyFee}`],
               ['Invite status/link', viewing.inviteId && inviteById.get(viewing.inviteId) ? `${inviteById.get(viewing.inviteId)?.status} · ${academyInviteLink('student', inviteById.get(viewing.inviteId)!.inviteToken)}` : 'No invite'],
               ['Created date', formatFirestoreDate(viewing.createdAt)],

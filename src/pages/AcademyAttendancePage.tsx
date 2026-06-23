@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { CalendarCheck, ClipboardList, Save, Search } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -116,7 +116,9 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
 
   const loadAttendance = async (currentBatches: BatchRecord[]) => {
     if (!academyId) return;
-    const attendanceSnapshot = await getDocs(collection(db, 'academies', academyId, 'attendance'));
+    const attendanceSnapshot = isCoachMode && linkedCoachId
+      ? await getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', linkedCoachId)))
+      : await getDocs(collection(db, 'academies', academyId, 'attendance'));
     const assignedBatchIds = new Set(currentBatches.map((batch) => batch.id));
     const records = attendanceSnapshot.docs
       .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
@@ -133,18 +135,23 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
       }
       setLoading(true);
       try {
-        const [batchSnapshot, studentSnapshot] = await Promise.all([
-          getDocs(collection(db, 'academies', academyId, 'batches')),
-          getDocs(collection(db, 'academies', academyId, 'students')),
-        ]);
+        const batchSnapshot = isCoachMode && linkedCoachId
+          ? await getDocs(query(collection(db, 'academies', academyId, 'batches'), where('coachId', '==', linkedCoachId)))
+          : await getDocs(collection(db, 'academies', academyId, 'batches'));
         const loadedBatches = batchSnapshot.docs
           .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
           .filter((batch) => batch.status === 'active')
           .filter((batch) => !isCoachMode || batch.coachId === linkedCoachId);
+        const assignedStudentIds = new Set(loadedBatches.flatMap((batch) => batch.studentIds));
+        const studentSnapshot = isCoachMode
+          ? await Promise.all(Array.from(assignedStudentIds).map((studentId) => getDoc(doc(db, 'academies', academyId, 'students', studentId))))
+          : (await getDocs(collection(db, 'academies', academyId, 'students'))).docs;
         const loadedStudents = new Map(
-          studentSnapshot.docs
+          studentSnapshot
+            .filter((docSnap) => docSnap.exists())
             .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
             .filter((student) => student.status !== 'disabled')
+            .filter((student) => !isCoachMode || assignedStudentIds.has(student.id))
             .map((student) => [student.id, student] as const),
         );
         setBatches(loadedBatches);
@@ -239,6 +246,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
         markedByUid: userProfile.uid,
         markedByName: userProfile.name,
         markedByRole: (isCoachMode ? 'coach' : 'academy_admin') as 'academy_admin' | 'coach',
+        studentIds: rows.map((row) => row.studentId),
         students: rows,
         ...counts,
         updatedAt: serverTimestamp(),
@@ -286,6 +294,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
     try {
       const counts = countAttendance(editingRows);
       await updateDoc(doc(db, 'academies', academyId, 'attendance', editingRecord.id), {
+        studentIds: editingRows.map((row) => row.studentId),
         students: editingRows,
         status: editingStatus,
         ...counts,

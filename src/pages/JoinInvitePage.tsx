@@ -17,17 +17,15 @@ type LinkedProfile = {
 const roleLabels: Record<InvitableRole, string> = {
   coach: 'Coach',
   student: 'Student',
-  parent: 'Parent',
 };
 
 function isInvitableRole(value: string | undefined): value is InvitableRole {
-  return value === 'coach' || value === 'student' || value === 'parent';
+  return value === 'coach' || value === 'student';
 }
 
 function profileCollection(role: InvitableRole) {
   if (role === 'coach') return 'coaches';
-  if (role === 'student') return 'students';
-  return 'parents';
+  return 'students';
 }
 
 export function JoinInvitePage() {
@@ -142,10 +140,11 @@ export function JoinInvitePage() {
             <h1 className="mt-5 text-3xl font-black text-navy">Join {academyName}</h1>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               You have been invited as <span className="font-black text-navy">{roleLabels[invite.role]}</span>{profile?.name ? ` for ${profile.name}` : ''}.
+              {invite.role === 'student' ? ' A parent or guardian may use their own Google account for this student dashboard.' : ''}
             </p>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
               <div><span className="font-black text-navy">Invite email:</span> {invite.email}</div>
-              {profile?.parentName ? <div><span className="font-black text-navy">Parent:</span> {profile.parentName}</div> : null}
+              {profile?.parentName ? <div><span className="font-black text-navy">Guardian / Contact:</span> {profile.parentName}</div> : null}
             </div>
 
             {!firebaseUser ? (

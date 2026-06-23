@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { CheckCircle2, Eye, IndianRupee, ReceiptText, RefreshCw } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -7,6 +7,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { FormSelect } from '../components/ui/FormSelect';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../lib/firebase';
@@ -487,6 +488,119 @@ export function AcademyFeesPage() {
             >
               Save Fee
             </button>
+          </div>
+        ) : null}
+      </Modal>
+    </div>
+  );
+}
+
+export function StudentFeesPage() {
+  const { userProfile } = useAuth();
+  const academyId = userProfile?.academyId;
+  const linkedStudentId = userProfile?.linkedStudentId;
+  const [fees, setFees] = useState<FeeRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [viewRecord, setViewRecord] = useState<FeeRecord | null>(null);
+
+  useEffect(() => {
+    const loadStudentFees = async () => {
+      if (!academyId || !linkedStudentId) {
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError('');
+      try {
+        const feeSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'fees'), where('studentId', '==', linkedStudentId)));
+        setFees(
+          feeSnapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as FeeRecord)
+            .sort((a, b) => String(b.month ?? '').localeCompare(String(a.month ?? ''))),
+        );
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'Could not load fee records.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadStudentFees();
+  }, [academyId, linkedStudentId]);
+
+  const overview = useMemo(() => {
+    const activeFees = fees.filter((fee) => displayStatus(fee) !== 'waived');
+    return {
+      records: fees.length,
+      paid: fees.filter((fee) => displayStatus(fee) === 'paid').length,
+      pendingBalance: activeFees.reduce((total, fee) => total + Math.max(0, Number(fee.amount ?? 0) - Number(fee.paidAmount ?? 0)), 0),
+      overdue: fees.filter((fee) => displayStatus(fee) === 'overdue').length,
+    };
+  }, [fees]);
+
+  if (!linkedStudentId) {
+    return <EmptyState title="Your student profile is not linked yet" description="Contact your academy." />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Student Fees" description="View fee records linked to your student profile." />
+      {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div> : null}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Fee Records" value={loading ? '...' : String(overview.records)} helper="Linked to this student" icon={ReceiptText} />
+        <StatCard label="Paid Records" value={loading ? '...' : String(overview.paid)} helper="Fully paid" icon={CheckCircle2} />
+        <StatCard label="Pending Balance" value={loading ? '...' : formatCurrency(overview.pendingBalance)} helper="Across active fees" icon={IndianRupee} />
+        <StatCard label="Overdue" value={loading ? '...' : String(overview.overdue)} helper="Past due date" icon={ReceiptText} />
+      </div>
+
+      {loading ? (
+        <EmptyState title="Loading fee records" description="Checking fee records for this student." />
+      ) : fees.length === 0 ? (
+        <EmptyState title="No fee records yet" description="Fee records will appear here once your academy generates them." />
+      ) : (
+        <DataTable columns={['Month', 'Amount', 'Paid', 'Balance', 'Status', 'Due', 'Paid Date', 'Mode', 'Action']}>
+          {fees.map((fee) => {
+            const shownStatus = displayStatus(fee);
+            return (
+              <tr className="border-t border-slate-100" key={fee.id}>
+                <td className="px-5 py-4 font-black text-navy">{fee.month}</td>
+                <td className="px-5 py-4 text-slate-600">{formatCurrency(fee.amount)}</td>
+                <td className="px-5 py-4 text-slate-600">{formatCurrency(fee.paidAmount)}</td>
+                <td className="px-5 py-4 font-black text-navy">{formatCurrency(Math.max(0, fee.amount - fee.paidAmount))}</td>
+                <td className="px-5 py-4"><Badge className={statusClass(shownStatus)}>{shownStatus}</Badge></td>
+                <td className="px-5 py-4 text-slate-600">{fee.dueDate || 'Not added'}</td>
+                <td className="px-5 py-4 text-slate-600">{fee.paidDate ?? 'Not paid'}</td>
+                <td className="px-5 py-4 text-slate-600">{fee.paymentMode ?? 'Not set'}</td>
+                <td className="px-5 py-4">
+                  <button className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewRecord(fee)} type="button" aria-label="View fee" title="View fee">View</button>
+                </td>
+              </tr>
+            );
+          })}
+        </DataTable>
+      )}
+
+      <Modal title="Fee Details" description={viewRecord ? `${viewRecord.month} · ${displayStatus(viewRecord)}` : undefined} open={Boolean(viewRecord)} onClose={() => setViewRecord(null)}>
+        {viewRecord ? (
+          <div className="grid gap-3 text-sm">
+            {[
+              ['Student', viewRecord.studentName],
+              ['Batch', viewRecord.batchName ?? 'Not assigned'],
+              ['Amount', formatCurrency(viewRecord.amount)],
+              ['Paid amount', formatCurrency(viewRecord.paidAmount)],
+              ['Balance', formatCurrency(Math.max(0, viewRecord.amount - viewRecord.paidAmount))],
+              ['Status', displayStatus(viewRecord)],
+              ['Due date', viewRecord.dueDate || 'Not added'],
+              ['Paid date', viewRecord.paidDate ?? 'Not paid'],
+              ['Payment mode', viewRecord.paymentMode ?? 'Not set'],
+              ['Note', viewRecord.note || 'No note'],
+            ].map(([label, value]) => (
+              <div className="rounded-2xl bg-slate-50 p-4" key={label}>
+                <div className="text-xs font-black uppercase tracking-wide text-slate-500">{label}</div>
+                <div className="mt-1 font-black text-navy">{value}</div>
+              </div>
+            ))}
           </div>
         ) : null}
       </Modal>
