@@ -450,7 +450,7 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
   }
 
   if (isCoachMode && !linkedCoachId) {
-    return <EmptyState title="No coach profile linked yet" description="Accept a coach invite before updating progress." />;
+    return <EmptyState title="No coach profile linked yet" description="Log in with the Google email your academy pre-authorized for coach access." />;
   }
 
   if (isStudentMode && !linkedStudentId) {

@@ -419,7 +419,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   }
 
   if (isCoachMode && !linkedCoachId) {
-    return <EmptyState title="No coach profile linked yet" description="Accept a coach invite before creating class reports." />;
+    return <EmptyState title="No coach profile linked yet" description="Log in with the Google email your academy pre-authorized for coach access." />;
   }
 
   return (

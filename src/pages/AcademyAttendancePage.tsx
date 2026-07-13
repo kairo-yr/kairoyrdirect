@@ -331,7 +331,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
   }
 
   if (isCoachMode && !linkedCoachId) {
-    return <EmptyState title="No coach profile linked yet" description="Accept a coach invite before marking attendance." />;
+    return <EmptyState title="No coach profile linked yet" description="Log in with the Google email your academy pre-authorized for coach access." />;
   }
 
   return (

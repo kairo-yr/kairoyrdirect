@@ -165,46 +165,8 @@ export async function updateAcademy(id: string, input: Partial<AcademyInput>) {
 }
 
 export async function approveAcademy(id: string) {
-  const actorUserId = await getActorUserId();
-  const previous = await getRequiredAcademy(id);
-  const { data, error } = await supabase
-    .from('academies')
-    .update({ status: 'active', approved_by: actorUserId, approved_at: new Date().toISOString(), disabled_at: null })
-    .eq('id', id)
-    .select('*')
-    .single();
+  const { data, error } = await supabase.rpc('approve_academy_application', { target_academy_id: id });
   if (error) throw error;
-
-  if (previous.created_by) {
-    const { error: membershipError } = await supabase.from('academy_memberships').upsert(
-      {
-        academy_id: id,
-        user_id: previous.created_by,
-        role: 'academy_admin',
-        status: 'active',
-        joined_at: new Date().toISOString(),
-      },
-      { onConflict: 'academy_id,user_id,role' },
-    );
-    if (membershipError) throw membershipError;
-
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({ app_role: 'academy_admin', status: 'active', academy_id: id })
-      .eq('id', previous.created_by);
-    if (profileError) throw profileError;
-  }
-
-  await insertAuditLog({
-    actor_user_id: actorUserId,
-    academy_id: id,
-    action: 'academy.approved',
-    entity_type: 'academy',
-    entity_id: id,
-    old_values: previous,
-    new_values: data,
-  });
-
   return data as Academy;
 }
 

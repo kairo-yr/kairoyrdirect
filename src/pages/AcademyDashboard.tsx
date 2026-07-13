@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { BookOpen, CalendarCheck, ClipboardList, FileText, KeyRound, School, UserPlus, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
@@ -7,13 +7,16 @@ import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
+import { getAcademyById, type Academy } from '../lib/academyApi';
+import { getBatchesByAcademy, type Batch } from '../lib/batchApi';
+import { getCoachesByAcademy, type Coach } from '../lib/coachApi';
+import { getStudentsByAcademy, type Student } from '../lib/studentApi';
 import { db } from '../lib/firebase';
-import type { AcademyCoachProfile, AcademyInvite, AcademyRegistration, AcademyStudentProfile } from '../types/auth';
+import type { AcademyInvite } from '../types/auth';
 import { getAcademyStatusClass } from '../utils/academyStatus';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 import { RoleDashboard } from './RoleDashboard';
 
-type BatchRecord = { id: string; status?: string };
 type AttendanceRecord = { id: string; date?: string; status?: string };
 type ClassReportRecord = { id: string; date?: string; status?: string; title?: string; batchName?: string; createdAt?: unknown };
 type ProgressRecord = { id: string; date?: string; ratings?: { overall?: number; calculation?: number; homework?: number } };
@@ -29,10 +32,10 @@ function getTodayDate() {
 export function AcademyDashboard() {
   const { userProfile } = useAuth();
   const academyId = userProfile?.academyId;
-  const [academy, setAcademy] = useState<AcademyRegistration | null>(null);
-  const [students, setStudents] = useState<AcademyStudentProfile[]>([]);
-  const [coaches, setCoaches] = useState<AcademyCoachProfile[]>([]);
-  const [batches, setBatches] = useState<BatchRecord[]>([]);
+  const [academy, setAcademy] = useState<Academy | null>(null);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [batches, setBatches] = useState<Batch[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [classReports, setClassReports] = useState<ClassReportRecord[]>([]);
   const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
@@ -47,21 +50,21 @@ export function AcademyDashboard() {
         return;
       }
       setLoading(true);
-      const [academySnapshot, studentSnapshot, coachSnapshot, batchSnapshot, attendanceSnapshot, reportSnapshot, progressSnapshot, homeworkSnapshot, inviteSnapshot] = await Promise.all([
-        getDoc(doc(db, 'academies', academyId)),
-        getDocs(collection(db, 'academies', academyId, 'students')),
-        getDocs(collection(db, 'academies', academyId, 'coaches')),
-        getDocs(collection(db, 'academies', academyId, 'batches')),
+      const [loadedAcademy, loadedCoaches, loadedStudents, loadedBatches, attendanceSnapshot, reportSnapshot, progressSnapshot, homeworkSnapshot, inviteSnapshot] = await Promise.all([
+        getAcademyById(academyId),
+        getCoachesByAcademy(academyId),
+        getStudentsByAcademy(academyId),
+        getBatchesByAcademy(academyId),
         getDocs(collection(db, 'academies', academyId, 'attendance')),
         getDocs(collection(db, 'academies', academyId, 'classReports')),
         getDocs(collection(db, 'academies', academyId, 'progressReports')),
         getDocs(collection(db, 'academies', academyId, 'homework')),
         getDocs(query(collection(db, 'academyInvites'), where('academyId', '==', academyId))),
       ]);
-      setAcademy(academySnapshot.exists() ? ({ id: academySnapshot.id, ...academySnapshot.data() } as AcademyRegistration) : null);
-      setStudents(studentSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyStudentProfile));
-      setCoaches(coachSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyCoachProfile));
-      setBatches(batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord));
+      setAcademy(loadedAcademy);
+      setStudents(loadedStudents);
+      setCoaches(loadedCoaches);
+      setBatches(loadedBatches);
       setAttendanceRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord));
       setClassReports(reportSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ClassReportRecord));
       setProgressRecords(progressSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressRecord));
@@ -74,7 +77,6 @@ export function AcademyDashboard() {
   }, [academyId, userProfile?.app_role]);
 
   const recentStudents = useMemo(() => students.slice(0, 5), [students]);
-  const recentCoaches = useMemo(() => coaches.slice(0, 5), [coaches]);
   const recentReports = useMemo(() => [...classReports].sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))).slice(0, 5), [classReports]);
   const pendingInvites = invites.filter((invite) => invite.status === 'pending');
   const activeBatchCount = batches.filter((batch) => batch.status === 'active').length;
@@ -122,7 +124,7 @@ export function AcademyDashboard() {
               <School size={22} />
               <h2 className="text-xl font-black">{academy?.name ?? 'Academy'}</h2>
             </div>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{academy?.city || 'City not set'} · {academy?.phone || 'Phone not set'}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{academy?.city || 'City not set'} · {academy?.primary_phone || 'Phone not set'}</p>
           </div>
           {academy ? <Badge className={getAcademyStatusClass(academy.status)}>{academy.status}</Badge> : null}
         </div>
@@ -130,11 +132,11 @@ export function AcademyDashboard() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total Students" value={loading ? '...' : String(students.length)} helper={`${students.filter((student) => student.status === 'active').length} active`} icon={Users} />
-        <StatCard label="Invited Students" value={loading ? '...' : String(students.filter((student) => student.status === 'invited').length)} helper="Awaiting invite acceptance" icon={UserPlus} />
+        <StatCard label="Pending Login Students" value={loading ? '...' : String(students.filter((student) => student.status === 'pending_login').length)} helper="Waiting for Google login" icon={UserPlus} />
         <StatCard label="Total Coaches" value={loading ? '...' : String(coaches.length)} helper={`${coaches.filter((coach) => coach.status === 'active').length} active`} icon={UserPlus} />
-        <StatCard label="Invited Coaches" value={loading ? '...' : String(coaches.filter((coach) => coach.status === 'invited').length)} helper="Awaiting invite acceptance" icon={UserPlus} />
+        <StatCard label="Pending Login Coaches" value={loading ? '...' : String(coaches.filter((coach) => coach.status === 'pending_login').length)} helper="Waiting for Google login" icon={UserPlus} />
         <StatCard label="Total Batches" value={loading ? '...' : String(batches.length)} helper={batches.length ? 'Academy batches' : 'No data yet'} icon={ClipboardList} />
-        <StatCard label="Pending Invites" value={loading ? '...' : String(pendingInvites.length)} helper="Student and coach invites" icon={KeyRound} />
+        <StatCard label="Pending Invites" value={loading ? '...' : String(pendingInvites.length)} helper="Student invites" icon={KeyRound} />
         <StatCard label="Today Attendance" value={loading ? '...' : String(todaySubmittedCount)} helper="Submitted records today" icon={CalendarCheck} />
         <StatCard label="Pending Attendance" value={loading ? '...' : String(pendingAttendanceToday)} helper="Active batches pending today" icon={CalendarCheck} />
         <StatCard label="Classes Recorded" value={loading ? '...' : String(attendanceRecords.length)} helper="Total attendance records" icon={ClipboardList} />
@@ -170,10 +172,10 @@ export function AcademyDashboard() {
             <DataTable columns={['Name', 'Email', 'Status', 'Created']}>
               {recentStudents.map((student) => (
                 <tr className="border-t border-slate-100" key={student.id}>
-                  <td className="px-5 py-4 font-black text-navy">{student.name}</td>
+                  <td className="px-5 py-4 font-black text-navy">{student.full_name}</td>
                   <td className="px-5 py-4 text-slate-600">{student.email}</td>
                   <td className="px-5 py-4 text-slate-600">{student.status}</td>
-                  <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(student.createdAt)}</td>
+                  <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(student.created_at)}</td>
                 </tr>
               ))}
             </DataTable>

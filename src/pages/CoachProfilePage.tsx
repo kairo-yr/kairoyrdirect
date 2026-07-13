@@ -1,24 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
-
-type CoachProfile = {
-  id: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  status?: string;
-};
+import { getCoachById, getCurrentUserCoach, updateCoach, type Coach } from '../lib/coachApi';
 
 export function CoachProfilePage() {
   const { refreshUserProfile, userProfile } = useAuth();
   const academyId = userProfile?.academyId;
   const linkedCoachId = userProfile?.linkedCoachId;
-  const [coach, setCoach] = useState<CoachProfile | null>(null);
+  const [coach, setCoach] = useState<Coach | null>(null);
   const [form, setForm] = useState({ name: '', phone: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,18 +18,13 @@ export function CoachProfilePage() {
 
   useEffect(() => {
     const loadProfile = async () => {
-      if (!academyId || !linkedCoachId) {
-        setLoading(false);
-        return;
-      }
       setLoading(true);
       setError('');
       try {
-        const snapshot = await getDoc(doc(db, 'academies', academyId, 'coaches', linkedCoachId));
-        const loadedCoach = snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as CoachProfile) : null;
+        const loadedCoach = linkedCoachId ? await getCoachById(linkedCoachId) : await getCurrentUserCoach(academyId);
         setCoach(loadedCoach);
         setForm({
-          name: loadedCoach?.name || userProfile?.name || '',
+          name: loadedCoach?.full_name || userProfile?.name || '',
           phone: loadedCoach?.phone || '',
         });
       } catch (caught) {
@@ -59,7 +45,7 @@ export function CoachProfilePage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!academyId || !linkedCoachId || !userProfile) return;
+    if (!coach) return;
     if (!form.name.trim()) {
       setError('Name is required.');
       return;
@@ -68,15 +54,12 @@ export function CoachProfilePage() {
     setError('');
     setMessage('');
     try {
-      const payload = {
-        name: form.name.trim(),
-        phone: form.phone.trim(),
-        updatedAt: serverTimestamp(),
-      };
-      await updateDoc(doc(db, 'academies', academyId, 'coaches', linkedCoachId), payload);
-      await updateDoc(doc(db, 'users', userProfile.uid), payload);
+      const updatedCoach = await updateCoach(coach.id, {
+        full_name: form.name,
+        phone: form.phone,
+      });
       await refreshUserProfile();
-      setCoach((current) => current ? { ...current, name: payload.name, phone: payload.phone } : current);
+      setCoach(updatedCoach);
       setMessage('Profile updated.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not update profile.');
@@ -85,30 +68,29 @@ export function CoachProfilePage() {
     }
   };
 
-  if (!linkedCoachId) {
-    return <EmptyState title="Your coach profile is not linked yet" description="Contact your academy." />;
-  }
-
   return (
     <div className="space-y-6">
       <PageHeader title="Coach Profile" description="Edit safe personal details for your coach account." />
       {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</div> : null}
       {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</div> : null}
       {loading ? (
-        <EmptyState title="Loading profile" description="Checking your linked coach profile." />
+        <EmptyState title="Loading profile" description="Checking your Supabase coach profile." />
+      ) : !coach ? (
+        <EmptyState title="Your coach profile is not linked yet" description="Contact your academy." />
       ) : (
         <div className="grid gap-6 xl:grid-cols-[1fr_1.2fr]">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
             <h2 className="text-xl font-black text-navy">Account Details</h2>
             <div className="mt-5 grid gap-3 text-sm">
               {[
-                ['Name', coach?.name || userProfile?.name || 'Not available'],
-                ['Email', coach?.email || userProfile?.email || 'Not available'],
-                ['Phone', coach?.phone || 'Not added'],
+                ['Name', coach.full_name || userProfile?.name || 'Not available'],
+                ['Email', coach.email || userProfile?.email || 'Not available'],
+                ['Phone', coach.phone || 'Not added'],
                 ['Role', 'Coach'],
-                ['Academy ID', academyId || 'Not assigned'],
-                ['Linked Coach ID', linkedCoachId],
-                ['Account status', userProfile?.status || coach?.status || 'Not available'],
+                ['Academy ID', coach.academy_id || academyId || 'Not assigned'],
+                ['Linked Coach ID', coach.id],
+                ['Membership ID', coach.membership_id || 'Not linked'],
+                ['Account status', userProfile?.status || coach.status || 'Not available'],
               ].map(([label, value]) => (
                 <div className="rounded-2xl bg-slate-50 p-4" key={label}>
                   <div className="text-xs font-black uppercase tracking-wide text-slate-500">{label}</div>

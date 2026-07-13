@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Building2, KeyRound, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { FormInput } from '../components/ui/FormInput';
@@ -21,18 +21,25 @@ function extractInvitePath(value: string) {
 }
 
 export function Onboarding() {
-  const { logout, registerAcademy, userProfile } = useAuth();
+  const { isAuthenticated, logout, registerAcademy, userProfile } = useAuth();
   const navigate = useNavigate();
   const [academyName, setAcademyName] = useState('');
   const [city, setCity] = useState('');
   const [phone, setPhone] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [registerError, setRegisterError] = useState('');
+  const [registerSuccess, setRegisterSuccess] = useState('');
   const [joinError, setJoinError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const registrationInFlight = useRef(false);
 
   const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (registrationInFlight.current) return;
+    if (!isAuthenticated) {
+      setRegisterError('Please sign in before submitting an academy.');
+      return;
+    }
     if (!academyName.trim()) {
       setRegisterError('Academy name is required.');
       return;
@@ -41,14 +48,42 @@ export function Onboarding() {
       setRegisterError('City is required.');
       return;
     }
+    registrationInFlight.current = true;
     setSubmitting(true);
     setRegisterError('');
+    setRegisterSuccess('');
     try {
       await registerAcademy({ name: academyName.trim(), city: city.trim(), phone: phone.trim() });
-      navigate('/pending-approval', { replace: true });
+      setRegisterSuccess('Academy submitted for approval.');
+      setAcademyName('');
+      setCity('');
+      setPhone('');
     } catch (caught) {
-      setRegisterError(caught instanceof Error ? caught.message : 'Could not register academy.');
+      const error = caught as Partial<{ message: string; code: string; details: string; hint: string; status: number }>;
+      const httpStatus = error.status
+        ?? (error.code === '23505' ? 409 : error.code === '42501' ? 403 : undefined);
+      if (import.meta.env.DEV) {
+        console.error('Academy registration failed', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          httpStatus,
+        });
+      }
+      if (error.code === '23505' || httpStatus === 409) {
+        setRegisterError('You already have an equivalent academy application pending approval.');
+      } else if (httpStatus === 401) {
+        setRegisterError('Your session has expired. Please sign in again and retry.');
+      } else if (httpStatus === 403) {
+        setRegisterError('Your account is not permitted to submit this application. Please refresh and try again.');
+      } else if (error.code === '22023') {
+        setRegisterError(error.message || 'Please check the academy name and city, then try again.');
+      } else {
+        setRegisterError('We could not submit your academy right now. Please try again; your form details have been preserved.');
+      }
     } finally {
+      registrationInFlight.current = false;
       setSubmitting(false);
     }
   };
@@ -87,6 +122,7 @@ export function Onboarding() {
               <FormInput label="Phone number optional" value={phone} onChange={(event) => setPhone(event.target.value)} />
             </div>
             {registerError ? <div className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">{registerError}</div> : null}
+            {registerSuccess ? <div className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">{registerSuccess}</div> : null}
             <button className="mt-5 rounded-2xl bg-directBlue px-5 py-3 text-sm font-black text-white disabled:opacity-60" disabled={submitting} type="submit">
               {submitting ? 'Submitting...' : 'Register Academy'}
             </button>

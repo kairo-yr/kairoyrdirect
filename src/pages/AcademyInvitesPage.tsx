@@ -72,7 +72,7 @@ export function AcademyInvitesPage() {
       {loading ? (
         <EmptyState title="Loading invites" description="Checking academy invite records." />
       ) : invites.length === 0 ? (
-        <EmptyState title="No invites sent yet" description="Student and coach invite links will appear here." />
+        <EmptyState title="No invites sent yet" description="Student invite links will appear here. Coach access is linked by Google email." />
       ) : (
         <DataTable columns={['Email', 'Role', 'Status', 'Created', 'Expires', 'Accepted', 'Invite Link', 'Action']}>
           {invites.map((invite) => (

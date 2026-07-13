@@ -10,7 +10,7 @@ export function PendingApproval() {
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
           <span className="text-xl font-black">!</span>
         </div>
-        <h1 className="mt-5 text-3xl font-black text-navy">Academy approval pending</h1>
+        <h1 className="mt-5 text-3xl font-black text-navy">Your academy is waiting for approval</h1>
         <p className="mt-2 text-sm leading-6 text-slate-600">
           Your academy registration is waiting for Kairoyr approval. You cannot access academy tools until approval is complete.
         </p>

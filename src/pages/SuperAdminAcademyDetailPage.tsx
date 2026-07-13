@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Ban, CheckCircle2, ClipboardList, GraduationCap, KeyRound, RotateCcw, ShieldCheck, Users, XCircle } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
+import { CoachManager } from '../components/coaches/CoachManager';
+import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { StatCard } from '../components/ui/StatCard';
+import { StudentManager } from '../components/students/StudentManager';
 import {
   approveAcademy,
   disableAcademy,
@@ -13,6 +16,7 @@ import {
   rejectAcademy,
   type Academy,
 } from '../lib/academyApi';
+import { getBatchesByAcademy, type Batch } from '../lib/batchApi';
 import { getAcademyStatusClass } from '../utils/academyStatus';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 
@@ -26,6 +30,7 @@ type AcademyCounts = {
 export function SuperAdminAcademyDetailPage() {
   const { academyId } = useParams();
   const [academy, setAcademy] = useState<Academy | null>(null);
+  const [batches, setBatches] = useState<Batch[]>([]);
   const [counts, setCounts] = useState<AcademyCounts>({ students: 0, coaches: 0, batches: 0, invites: 0 });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -41,8 +46,10 @@ export function SuperAdminAcademyDetailPage() {
     setError('');
     try {
       const loadedAcademy = await getAcademyById(academyId);
+      const loadedBatches = loadedAcademy ? await getBatchesByAcademy(academyId) : [];
       setAcademy(loadedAcademy);
-      setCounts({ students: 0, coaches: 0, batches: 0, invites: 0 });
+      setBatches(loadedBatches);
+      setCounts((current) => ({ ...current, batches: loadedBatches.length, invites: 0 }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load academy.');
     } finally {
@@ -53,6 +60,14 @@ export function SuperAdminAcademyDetailPage() {
   useEffect(() => {
     void loadAcademy();
   }, [academyId]);
+
+  const updateCoachCount = useCallback((coachCount: number) => {
+    setCounts((current) => ({ ...current, coaches: coachCount }));
+  }, []);
+
+  const updateStudentCount = useCallback((studentCount: number) => {
+    setCounts((current) => ({ ...current, students: studentCount }));
+  }, []);
 
   const runAction = async (action: () => Promise<void>, success: string) => {
     setError('');
@@ -88,9 +103,9 @@ export function SuperAdminAcademyDetailPage() {
       {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</div> : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <StatCard label="Students" value={String(counts.students)} helper="Next migration phase" icon={GraduationCap} />
-        <StatCard label="Coaches" value={String(counts.coaches)} helper="Next migration phase" icon={Users} />
-        <StatCard label="Batches" value={String(counts.batches)} helper="Next migration phase" icon={ClipboardList} />
+        <StatCard label="Students" value={String(counts.students)} helper="Supabase students" icon={GraduationCap} />
+        <StatCard label="Coaches" value={String(counts.coaches)} helper="Supabase coaches" icon={Users} />
+        <StatCard label="Batches" value={String(counts.batches)} helper="Supabase batches" icon={ClipboardList} />
         <StatCard label="Invites" value={String(counts.invites)} helper="Next migration phase" icon={KeyRound} />
         <StatCard label="Status" value={academy.status} helper="Current academy state" icon={ShieldCheck} />
       </div>
@@ -147,7 +162,49 @@ export function SuperAdminAcademyDetailPage() {
         ) : null}
       </div>
 
-      <EmptyState title="Students, coaches, batches, and invites migrate next" description="This page now reads the academy profile from Supabase. Related academy operating data will appear after the next migration phase." />
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+        <StudentManager
+          academyId={academy.id}
+          canManage
+          title="Academy Students"
+          description="Supabase student records for this academy. Batches, attendance, reports, homework, and fees remain for later phases."
+          onCountChange={updateStudentCount}
+        />
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+        <CoachManager
+          academyId={academy.id}
+          canManage
+          title="Academy Coaches"
+          description="Supabase coach records for this academy. Students, batches, and invites remain for later phases."
+          onCountChange={updateCoachCount}
+        />
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+        <div className="mb-4">
+          <h2 className="text-xl font-black text-navy">Academy Batches</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-500">Supabase batch records for this academy.</p>
+        </div>
+        {batches.length === 0 ? (
+          <EmptyState title="No batches yet" description="Batches created by the academy admin will appear here." />
+        ) : (
+          <DataTable columns={['Batch', 'Coach', 'Schedule', 'Students', 'Status']}>
+            {batches.map((batch) => (
+              <tr className="border-t border-slate-100" key={batch.id}>
+                <td className="px-5 py-4 font-black text-navy">{batch.name}</td>
+                <td className="px-5 py-4 text-slate-600">{batch.primary_coach?.full_name ?? 'Not assigned'}</td>
+                <td className="px-5 py-4 text-slate-600">{batch.schedule_label || 'Not set'}</td>
+                <td className="px-5 py-4 text-slate-600">{batch.student_count ?? 0}</td>
+                <td className="px-5 py-4 text-slate-600">{batch.status}</td>
+              </tr>
+            ))}
+          </DataTable>
+        )}
+      </section>
+
+      <EmptyState title="Attendance, reports, homework, fees, and invites migrate next" description="This page now reads academy profile, coach, student, and batch records from Supabase. Related academy operating data will appear after later migration phases." />
     </div>
   );
 }

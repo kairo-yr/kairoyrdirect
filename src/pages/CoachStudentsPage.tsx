@@ -1,130 +1,93 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { Eye } from 'lucide-react';
 import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
-import type { AcademyStudentProfile } from '../types/auth';
+import { getBatchStudents, getBatchesByCoach, type Batch, type BatchStudent } from '../lib/batchApi';
+import { getCurrentUserCoach, type Coach } from '../lib/coachApi';
+import type { Student } from '../lib/studentApi';
 
-type BatchRecord = {
-  id: string;
-  name?: string;
-  coachId?: string | null;
-  studentIds?: string[];
-  status?: 'active' | 'disabled';
-};
-
-type AttendanceRecord = {
-  id: string;
-  students?: Array<{ studentId?: string; status?: string }>;
-};
-
-type ProgressRecord = {
-  id: string;
-  studentId?: string;
-  date?: string;
-  ratings?: { overall?: number };
-};
-
-function attendanceSummary(studentId: string, records: AttendanceRecord[]) {
-  const entries = records.flatMap((record) => (record.students ?? []).filter((entry) => entry.studentId === studentId));
-  if (entries.length === 0) return 'No data';
-  const present = entries.filter((entry) => entry.status === 'present').length;
-  return `${Math.round((present / entries.length) * 100)}%`;
+function labelize(value?: string | null) {
+  if (!value) return 'Not set';
+  return value.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
 
 export function CoachStudentsPage() {
   const { userProfile } = useAuth();
-  const academyId = userProfile?.academyId;
-  const linkedCoachId = userProfile?.linkedCoachId;
-  const [batches, setBatches] = useState<BatchRecord[]>([]);
-  const [students, setStudents] = useState<AcademyStudentProfile[]>([]);
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
-  const [progressRecords, setProgressRecords] = useState<ProgressRecord[]>([]);
+  const [coach, setCoach] = useState<Coach | null>(null);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [assignments, setAssignments] = useState<BatchStudent[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadStudents = async () => {
-      if (!academyId || !linkedCoachId) {
-        setLoading(false);
-        return;
-      }
       setLoading(true);
       try {
-        const batchSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'batches'), where('coachId', '==', linkedCoachId)));
-        const assignedBatches = batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord);
-        const assignedStudentIds = new Set(assignedBatches.flatMap((batch) => batch.studentIds ?? []));
-        const [studentSnapshots, attendanceSnapshot] = await Promise.all([
-          Promise.all(Array.from(assignedStudentIds).map((studentId) => getDoc(doc(db, 'academies', academyId, 'students', studentId)))),
-          getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', linkedCoachId))),
-        ]);
-        setBatches(assignedBatches);
-        setStudents(
-          studentSnapshots
-            .filter((docSnap) => docSnap.exists())
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyStudentProfile),
-        );
-        setAttendanceRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord));
-        const progressMap = new Map<string, ProgressRecord>();
-        for (const studentId of assignedStudentIds) {
-          const progressSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'progressReports'), where('studentId', '==', studentId)));
-          progressSnapshot.docs.forEach((docSnap) => progressMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ProgressRecord));
+        const currentCoach = await getCurrentUserCoach(userProfile?.academyId);
+        setCoach(currentCoach);
+        if (!currentCoach) {
+          setBatches([]);
+          setAssignments([]);
+          return;
         }
-        setProgressRecords(Array.from(progressMap.values()));
+
+        const assignedBatches = await getBatchesByCoach(currentCoach.id);
+        const loadedAssignments = await Promise.all(assignedBatches.map((batch) => getBatchStudents(batch.id)));
+        setBatches(assignedBatches);
+        setAssignments(loadedAssignments.flat());
       } finally {
         setLoading(false);
       }
     };
 
     void loadStudents();
-  }, [academyId, linkedCoachId]);
+  }, [userProfile?.academyId, userProfile?.id]);
+
+  const students = useMemo(() => {
+    const map = new Map<string, Student>();
+    assignments.forEach((assignment) => {
+      if (assignment.student) map.set(assignment.student.id, assignment.student);
+    });
+    return Array.from(map.values());
+  }, [assignments]);
 
   const batchNamesByStudent = useMemo(() => {
+    const batchNames = new Map(batches.map((batch) => [batch.id, batch.name]));
     const map = new Map<string, string[]>();
-    batches.forEach((batch) => {
-      (batch.studentIds ?? []).forEach((studentId) => {
-        map.set(studentId, [...(map.get(studentId) ?? []), batch.name || 'Untitled batch']);
-      });
+    assignments.forEach((assignment) => {
+      const name = batchNames.get(assignment.batch_id) ?? 'Untitled batch';
+      map.set(assignment.student_id, [...(map.get(assignment.student_id) ?? []), name]);
     });
     return map;
-  }, [batches]);
+  }, [assignments, batches]);
 
-  const latestProgressByStudent = useMemo(() => {
-    const map = new Map<string, ProgressRecord>();
-    progressRecords.forEach((record) => {
-      if (!record.studentId) return;
-      const current = map.get(record.studentId);
-      if (!current || String(record.date ?? '').localeCompare(String(current.date ?? '')) > 0) map.set(record.studentId, record);
-    });
-    return map;
-  }, [progressRecords]);
-
-  if (!linkedCoachId) {
+  if (!coach && !loading) {
     return <EmptyState title="Your coach profile is not linked yet" description="Contact your academy." />;
   }
 
   return (
     <div className="space-y-6">
-      <PageHeader title="My Students" description="View-only students from your assigned batches." />
+      <PageHeader title="My Students" description="View-only students from your assigned Supabase batches." />
       {loading ? (
         <EmptyState title="Loading students" description="Checking assigned batches and students." />
       ) : students.length === 0 ? (
         <EmptyState title="No assigned students yet" description="Students will appear here after academy admin assigns them to your batches." />
       ) : (
-        <DataTable columns={['Student', 'Phone', 'Login Email', 'Batch', 'Attendance', 'Latest Progress', 'Action']}>
+        <DataTable columns={['Student', 'Phone', 'Login Email', 'Parent / Guardian', 'Batch', 'Level', 'Action']}>
           {students.map((student) => {
             const batchNames = batchNamesByStudent.get(student.id) ?? [];
-            const latestProgress = latestProgressByStudent.get(student.id);
             return (
               <tr className="border-t border-slate-100" key={student.id}>
-                <td className="px-5 py-4 font-black text-navy">{student.name}</td>
+                <td className="px-5 py-4 font-black text-navy">{student.full_name}</td>
                 <td className="px-5 py-4 text-slate-600">{student.phone || 'Not added'}</td>
                 <td className="px-5 py-4 text-slate-600">{student.email || 'Not added'}</td>
+                <td className="px-5 py-4 text-slate-600">
+                  <div>{student.parent_name || 'Not added'}</div>
+                  <div className="mt-1 text-xs font-semibold">{student.parent_phone || student.parent_email || 'No parent contact'}</div>
+                </td>
                 <td className="px-5 py-4 text-slate-600" title={batchNames.join(', ') || undefined}>{batchNames.length > 1 ? `${batchNames.length} batches` : batchNames[0] ?? 'Not assigned'}</td>
-                <td className="px-5 py-4 text-slate-600">{attendanceSummary(student.id, attendanceRecords)}</td>
-                <td className="px-5 py-4 text-slate-600">{latestProgress?.ratings?.overall ? `${latestProgress.ratings.overall}/5` : 'No progress'}</td>
+                <td className="px-5 py-4 text-slate-600">{labelize(student.level)}</td>
                 <td className="px-5 py-4 text-slate-600"><Eye size={16} aria-label="View only" /></td>
               </tr>
             );
