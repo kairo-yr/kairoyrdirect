@@ -47,6 +47,15 @@ type MembershipContextRow = {
   created_at: string | null;
 };
 
+type ClaimedCoachRow = {
+  id: string;
+  academy_id: string;
+  user_id: string | null;
+  membership_id: string | null;
+  email: string | null;
+  status: string;
+};
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const appRoles = new Set<Role>(['super_admin', 'academy_admin', 'coach', 'parent', 'student', 'unassigned', 'user']);
@@ -135,6 +144,7 @@ async function getOrCreateUserProfile(user: AuthUser) {
 
   if (fetchError) throw fetchError;
   if (existingProfile) {
+    await claimVerifiedCoachAccount(user);
     const { error: claimError } = await supabase.rpc('claim_pending_memberships');
     if (claimError) throw claimError;
     const { data: claimedProfile, error: claimedFetchError } = await supabase
@@ -163,6 +173,7 @@ async function getOrCreateUserProfile(user: AuthUser) {
     .single<ProfileRow>();
 
   if (insertError) throw insertError;
+  await claimVerifiedCoachAccount(user);
   const { error: claimError } = await supabase.rpc('claim_pending_memberships');
   if (claimError) throw claimError;
   const { data: claimedProfile, error: claimedFetchError } = await supabase
@@ -172,6 +183,77 @@ async function getOrCreateUserProfile(user: AuthUser) {
     .maybeSingle<ProfileRow>();
   if (claimedFetchError) throw claimedFetchError;
   return normalizeProfile(claimedProfile ?? createdProfile, user);
+}
+
+async function claimVerifiedCoachAccount(user: AuthUser) {
+  const verifiedEmail = user.email?.trim().toLowerCase() ?? '';
+  const { data, error, status } = await supabase.rpc('claim_my_coach_account');
+  const claimedCoaches = (data ?? []) as ClaimedCoachRow[];
+
+  if (import.meta.env.DEV) {
+    console.info('Coach account claim', {
+      authenticatedUserId: user.id,
+      authenticatedEmail: verifiedEmail,
+      matchingPendingCoachIds: claimedCoaches.map((coach) => coach.id),
+      matchingRowCount: claimedCoaches.length,
+      membershipIds: claimedCoaches.map((coach) => coach.membership_id),
+      rpcResponse: data,
+      httpStatus: status,
+      errorCode: error?.code,
+      errorMessage: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+    });
+  }
+
+  if (error) throw Object.assign(error, { status });
+  if (claimedCoaches.length === 0) return [];
+
+  const coachIds = claimedCoaches.map((coach) => coach.id);
+  const membershipIds = claimedCoaches
+    .map((coach) => coach.membership_id)
+    .filter((membershipId): membershipId is string => Boolean(membershipId));
+  const academyIds = [...new Set(claimedCoaches.map((coach) => coach.academy_id))];
+
+  const [{ data: persistedCoaches, error: coachError }, { data: persistedMemberships, error: membershipError }] = await Promise.all([
+    supabase.from('coaches').select('*').in('id', coachIds),
+    supabase.from('academy_memberships').select('*').in('id', membershipIds),
+  ]);
+  if (coachError) throw coachError;
+  if (membershipError) throw membershipError;
+
+  // These reads refresh every coach-dependent source after the atomic claim.
+  // Pages mount after profile resolution and perform their own state-setting fetch.
+  const downstreamRefreshes = await Promise.all(academyIds.map(async (academyId) => {
+    const [coaches, batches, students] = await Promise.all([
+      supabase.from('coaches').select('*').eq('academy_id', academyId),
+      supabase.from('batches').select('*, primary_coach:coaches(id, full_name, status)').eq('academy_id', academyId),
+      supabase.from('students').select('*').eq('academy_id', academyId),
+    ]);
+    if (coaches.error) throw coaches.error;
+    if (batches.error) throw batches.error;
+    if (students.error) throw students.error;
+    return {
+      academyId,
+      pendingLoginCount: (coaches.data ?? []).filter((coach) => coach.status === 'pending_login').length,
+      academyCoaches: coaches.data ?? [],
+      batchCoachSelectors: (coaches.data ?? []).filter((coach) => coach.status === 'active'),
+      studentCoachSelectors: (coaches.data ?? []).filter((coach) => coach.status === 'active'),
+      batches: batches.data ?? [],
+      students: students.data ?? [],
+    };
+  }));
+
+  if (import.meta.env.DEV) {
+    console.info('Coach account claim persisted', {
+      coaches: persistedCoaches,
+      memberships: persistedMemberships,
+      downstreamRefreshes,
+    });
+  }
+
+  window.dispatchEvent(new CustomEvent('coach-account-claimed', { detail: downstreamRefreshes }));
+  return (persistedCoaches ?? []) as ClaimedCoachRow[];
 }
 
 async function updateProfileRole(
@@ -246,14 +328,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadSessionProfile = useCallback(async (activeSession: Session | null) => {
     setSession(activeSession);
-    setUser(activeSession?.user ?? null);
 
     if (!activeSession?.user) {
+      setUser(null);
       setUserProfile(null);
       return null;
     }
 
-    const profile = await getOrCreateUserProfile(activeSession.user);
+    const { data: { user: verifiedUser }, error: verifiedUserError } = await supabase.auth.getUser();
+    if (verifiedUserError) throw verifiedUserError;
+    if (!verifiedUser) throw new Error('Authenticated user could not be verified.');
+
+    setUser(verifiedUser);
+    const profile = await getOrCreateUserProfile(verifiedUser);
     setUserProfile(profile);
     return profile;
   }, []);
