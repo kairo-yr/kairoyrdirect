@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import type { AcademyInvite, AcademyRegistration, AuthUser, InvitableRole, Role, UserProfile, UserStatus } from '../types/auth';
@@ -323,11 +323,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const profileUserIdRef = useRef<string | null>(null);
 
   const loadSessionProfile = useCallback(async (activeSession: Session | null) => {
     setSession(activeSession);
 
     if (!activeSession?.user) {
+      profileUserIdRef.current = null;
       setUser(null);
       setUserProfile(null);
       return null;
@@ -339,6 +341,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(verifiedUser);
     const profile = await getOrCreateUserProfile(verifiedUser);
+    profileUserIdRef.current = verifiedUser.id;
     setUserProfile(profile);
     return profile;
   }, []);
@@ -372,15 +375,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void loadInitialSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, activeSession) => {
-      void (async () => {
-        setLoading(true);
-        try {
-          await loadSessionProfile(activeSession);
-        } finally {
-          setLoading(false);
+    const { data: listener } = supabase.auth.onAuthStateChange((event, activeSession) => {
+      // Token refreshes and repeated sign-in notifications are background events.
+      // Keep the established route mounted while replacing the session silently.
+      if (activeSession?.user) {
+        setSession(activeSession);
+        setUser(activeSession.user);
+        if (event !== 'INITIAL_SESSION' && profileUserIdRef.current !== activeSession.user.id) {
+          void loadSessionProfile(activeSession).catch((error) => {
+            console.error('Unable to load the authenticated profile:', error);
+          });
         }
-      })();
+        return;
+      }
+
+      // Only a conclusive signed-out event may clear established authentication.
+      if (event === 'SIGNED_OUT') {
+        profileUserIdRef.current = null;
+        setSession(null);
+        setUser(null);
+        setUserProfile(null);
+      }
     });
 
     return () => {
