@@ -13,7 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCurrentCoach } from '../hooks/useCurrentCoach';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import { db } from '../lib/firebase';
-import { getCoachWorkspace } from '../lib/coachWorkspaceApi';
+import { getAcademyWorkspace, getCoachWorkspace } from '../lib/coachWorkspaceApi';
 import {
   currentMonthValue,
   formatDateOnly,
@@ -119,7 +119,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
   const [studentSearch, setStudentSearch] = useState('');
   const [filterCoachId, setFilterCoachId] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<StudentAttendanceSummary | null>(null);
-  const [markAttendanceOpen, setMarkAttendanceOpen] = useState(false);
+  const [markAttendanceOpen, setMarkAttendanceOpen] = useState(isCoachMode);
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
   const [editingRows, setEditingRows] = useState<AttendanceStudent[]>([]);
   const [editingStatus, setEditingStatus] = useState<AttendanceStatus>('submitted');
@@ -164,17 +164,9 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
           loadedBatches = workspace.batches;
           loadedStudents = new Map(workspace.students.map((student) => [student.id, student]));
         } else {
-          const batchSnapshot = await getDocs(collection(db, 'academies', academyId, 'batches'));
-          loadedBatches = batchSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
-            .filter((batch) => batch.status === 'active');
-          const studentSnapshot = await getDocs(collection(db, 'academies', academyId, 'students'));
-          loadedStudents = new Map(
-            studentSnapshot.docs
-              .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
-              .filter((student) => student.status !== 'disabled')
-              .map((student) => [student.id, student] as const),
-          );
+          const workspace = await getAcademyWorkspace(academyId);
+          loadedBatches = workspace.batches;
+          loadedStudents = new Map(workspace.students.map((student) => [student.id, student]));
         }
         setBatches(loadedBatches);
         setStudentsById(loadedStudents);
@@ -327,7 +319,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
       });
       await loadAttendance(batches);
       setMessage(recordId ? 'Attendance updated.' : 'Attendance submitted.');
-      setMarkAttendanceOpen(false);
+      if (!isCoachMode) setMarkAttendanceOpen(false);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to save attendance.');
     } finally {
@@ -409,9 +401,9 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge className="bg-blue-50 text-directBlue">{isCoachMode ? 'Coach scoped' : 'Academy scoped'}</Badge>
-          <button className="inline-flex items-center gap-2 rounded-2xl bg-directBlue px-5 py-3 text-sm font-black text-white" onClick={() => setMarkAttendanceOpen(true)} type="button">
+          {!isCoachMode ? <button className="inline-flex items-center gap-2 rounded-2xl bg-directBlue px-5 py-3 text-sm font-black text-white" onClick={() => setMarkAttendanceOpen(true)} type="button">
             <Plus size={18} /> Mark Attendance
-          </button>
+          </button> : null}
         </div>
       </div>
 
@@ -425,16 +417,14 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
       {message ? <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-directBlue">{message}</div> : null}
 
       <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-card md:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-black text-navy">Batch Attendance Overview</h2>
-            <p className="mt-1 text-sm text-slate-500">Student totals for the selected batch and month.</p>
-          </div>
-          <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-[240px_170px_240px]">
+        <div>
+          <h2 className="text-xl font-black text-navy">Batch Attendance Overview</h2>
+          <p className="mt-1 text-sm text-slate-500">Student totals for the selected batch and month.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(220px,280px)_180px_minmax(240px,1fr)]">
             <FormSelect label="Batch" value={overviewBatchId} onChange={(event) => changeOverviewBatch(event.target.value)} options={[{ label: 'Select batch', value: '' }, ...batches.map((batch) => ({ label: batch.name, value: batch.id }))]} />
             <FormInput label="Month" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
             <FormInput label="Student search" value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search this batch" />
-          </div>
         </div>
 
         {loading ? (
@@ -442,9 +432,9 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
         ) : loadError ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700"><span>{loadError}</span><button className="rounded-xl bg-white px-3 py-2 text-xs font-black" onClick={() => setReloadToken((value) => value + 1)} type="button">Retry</button></div>
         ) : !overviewBatchId ? (
-          <EmptyState title="Select a batch" description="Choose a batch to inspect attendance history." />
+          <EmptyState title={batches.length ? 'Select a batch' : isCoachMode ? 'No batches are currently assigned to you.' : 'No active batches have been created for this academy yet.'} description={batches.length ? 'Choose a batch to inspect attendance history.' : 'Attendance will be available after an active batch is assigned.'} />
         ) : filteredHistory.length === 0 ? (
-          <EmptyState title="No attendance in this period" description="No attendance has been recorded for this batch during the selected period." />
+          <EmptyState title="No attendance records found" description="No attendance records were found for the selected batch and month." />
         ) : attendanceSummary.length === 0 ? (
           <EmptyState title="No matching students" description="Try a different student search." />
         ) : (
@@ -497,7 +487,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
           <button className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700" onClick={() => setAllRows('present')} type="button">Mark all present</button>
           <button className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-black text-rose-700" onClick={() => setAllRows('absent')} type="button">Mark all absent</button>
           <button className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700" onClick={resetRows} type="button"><RotateCcw size={14} /> Reset</button>
-          <button className="ml-auto rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600" onClick={() => setMarkAttendanceOpen(false)} type="button">Close</button>
+          {!isCoachMode ? <button className="ml-auto rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600" onClick={() => setMarkAttendanceOpen(false)} type="button">Close</button> : null}
         </div>
 
         <div className="mt-5 space-y-3">

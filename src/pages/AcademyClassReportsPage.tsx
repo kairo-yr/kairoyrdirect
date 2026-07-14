@@ -12,7 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCurrentCoach } from '../hooks/useCurrentCoach';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import { db } from '../lib/firebase';
-import { getCoachWorkspace } from '../lib/coachWorkspaceApi';
+import { getAcademyWorkspace, getCoachWorkspace } from '../lib/coachWorkspaceApi';
 import { currentMonthValue, formatDateOnly, groupReportsByBatch, monthDateRange } from '../lib/attendanceReportHistory';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 import { createAuditLog } from '../utils/superAdminActions';
@@ -145,12 +145,9 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   const [selectedDate, setSelectedDate] = useState(getTodayDate());
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [form, setForm] = useState<ReportForm>(emptyForm);
-  const [filterStartDate, setFilterStartDate] = useState('');
-  const [filterEndDate, setFilterEndDate] = useState('');
   const [filterMonth, setFilterMonth] = useState(currentMonthValue());
   const [filterBatchId, setFilterBatchId] = useState(searchParams.get('batchId') ?? '');
   const [filterCoachId, setFilterCoachId] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
   const [viewReport, setViewReport] = useState<ClassReportRecord | null>(null);
   const [editReport, setEditReport] = useState<ClassReportRecord | null>(null);
@@ -206,17 +203,9 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
           loadedBatches = workspace.batches;
           loadedStudents = new Map(workspace.students.map((student) => [student.id, student]));
         } else {
-          const batchSnapshot = await getDocs(collection(db, 'academies', academyId, 'batches'));
-          loadedBatches = batchSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
-            .filter((batch) => batch.status === 'active');
-          const studentDocs = await getDocs(collection(db, 'academies', academyId, 'students'));
-          loadedStudents = new Map(
-            studentDocs.docs
-              .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
-              .filter((student) => student.status !== 'disabled')
-              .map((student) => [student.id, student] as const),
-          );
+          const workspace = await getAcademyWorkspace(academyId);
+          loadedBatches = workspace.batches;
+          loadedStudents = new Map(workspace.students.map((student) => [student.id, student]));
         }
         setBatches(loadedBatches);
         setStudentsById(loadedStudents);
@@ -269,26 +258,23 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   const filteredReports = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     const monthRange = monthDateRange(filterMonth);
-    const hasCustomRange = Boolean(filterStartDate || filterEndDate);
-    const effectiveStart = hasCustomRange ? filterStartDate : monthRange.start;
-    const effectiveEnd = hasCustomRange ? filterEndDate : monthRange.end;
     return reports.filter((report) => {
-      const matchesStart = effectiveStart ? report.date >= effectiveStart : true;
-      const matchesEnd = effectiveEnd ? report.date <= effectiveEnd : true;
+      const matchesStart = monthRange.start ? report.date >= monthRange.start : true;
+      const matchesEnd = monthRange.end ? report.date <= monthRange.end : true;
       const matchesBatch = filterBatchId ? report.batchId === filterBatchId : true;
       const matchesCoach = filterCoachId ? report.coachId === filterCoachId : true;
-      const matchesStatus = filterStatus ? report.status === filterStatus : true;
       const haystack = [
         report.title,
         report.topicCovered,
+        report.classSummary,
         report.batchName,
         report.coachName,
         report.studentNotes.map((note) => `${note.studentName} ${note.note}`).join(' '),
       ].join(' ').toLowerCase();
       const matchesSearch = normalizedSearch ? haystack.includes(normalizedSearch) : true;
-      return matchesStart && matchesEnd && matchesBatch && matchesCoach && matchesStatus && matchesSearch;
+      return matchesStart && matchesEnd && matchesBatch && matchesCoach && matchesSearch;
     });
-  }, [filterBatchId, filterCoachId, filterEndDate, filterMonth, filterStartDate, filterStatus, reports, search]);
+  }, [filterBatchId, filterCoachId, filterMonth, reports, search]);
   const groupedReports = useMemo(() => groupReportsByBatch(filteredReports), [filteredReports]);
 
   const changeBatchFilter = (batchId: string) => {
@@ -302,10 +288,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   const clearFilters = () => {
     setFilterBatchId('');
     setFilterMonth(currentMonthValue());
-    setFilterStartDate('');
-    setFilterEndDate('');
     setFilterCoachId('');
-    setFilterStatus('');
     setSearch('');
     const next = new URLSearchParams(searchParams);
     next.delete('batchId');
@@ -651,26 +634,14 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
       </section>
       ) : null}
 
-      <section>
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+      <section className="space-y-4">
+        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-card md:p-5">
           <div><h2 className="text-xl font-black text-navy">{isCoachMode ? 'My Class Reports' : 'Reports History'}</h2><p className="mt-1 text-sm text-slate-500">Batch-first history, newest reports first.</p></div>
-          <div className="grid w-full gap-3 md:grid-cols-3 xl:grid-cols-7">
-            <FormInput label="Month" type="month" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)} />
-            <FormInput label="Start" type="date" value={filterStartDate} onChange={(event) => setFilterStartDate(event.target.value)} />
-            <FormInput label="End" type="date" value={filterEndDate} onChange={(event) => setFilterEndDate(event.target.value)} />
+          <div className={`mt-4 grid gap-3 sm:grid-cols-2 ${isCoachMode ? 'xl:grid-cols-[minmax(220px,1fr)_180px_minmax(260px,1.4fr)_auto]' : 'xl:grid-cols-[minmax(220px,1fr)_minmax(200px,1fr)_180px_minmax(260px,1.4fr)_auto]'}`}>
             <FormSelect label="Batch" value={filterBatchId} onChange={(event) => changeBatchFilter(event.target.value)} options={[{ label: 'All batches', value: '' }, ...batches.map((batch) => ({ label: batch.name, value: batch.id }))]} />
-            <FormSelect label="Coach" value={filterCoachId} onChange={(event) => setFilterCoachId(event.target.value)} options={[{ label: 'All coaches', value: '' }, ...coachOptions]} disabled={isCoachMode} />
-            <FormSelect
-              label="Status"
-              value={filterStatus}
-              onChange={(event) => setFilterStatus(event.target.value)}
-              options={[
-                { label: 'All statuses', value: '' },
-                { label: 'Draft', value: 'draft' },
-                { label: 'Submitted', value: 'submitted' },
-              ]}
-            />
-            <FormInput label="Search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Topic, title, student" />
+            {!isCoachMode ? <FormSelect label="Coach" value={filterCoachId} onChange={(event) => setFilterCoachId(event.target.value)} options={[{ label: 'All coaches', value: '' }, ...coachOptions]} /> : null}
+            <FormInput label="Month" type="month" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)} />
+            <FormInput label="Search reports" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Topic, details, student" />
             <div className="flex items-end"><button className="inline-flex w-full items-center justify-center gap-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-600" onClick={clearFilters} type="button"><RotateCcw size={15} /> Clear</button></div>
           </div>
         </div>
@@ -679,7 +650,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
         ) : loadError ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700"><span>{loadError}</span><button className="rounded-xl bg-white px-3 py-2 text-xs font-black" onClick={() => setReloadToken((value) => value + 1)} type="button">Retry</button></div>
         ) : filteredReports.length === 0 ? (
-          <EmptyState title={isCoachMode ? 'No class reports created yet' : 'No class reports found'} description="Class reports will appear here after they are saved." />
+          <EmptyState title="No class reports found" description="No class reports were found for the selected filters." />
         ) : (
           <div className="space-y-5">
             {groupedReports.map((group) => (
@@ -691,8 +662,8 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
                       <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs font-black uppercase text-directBlue">{formatDateOnly(report.date)}</div><h4 className="mt-1 font-black text-navy">{report.title}</h4></div><Badge className={report.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>{report.status}</Badge></div>
                       <p className="mt-2 text-sm font-semibold text-slate-600">{report.topicCovered}</p>
                       {report.classSummary ? <p className="mt-2 line-clamp-2 text-sm text-slate-500">{report.classSummary}</p> : null}
-                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-slate-500"><span>{report.coachName ?? 'Coach not assigned'}</span><span>{report.studentsPresentIds.length} present · {report.studentsAbsentIds.length} absent</span></div>
-                      <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button><button className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => openEdit(report)} type="button">Edit</button><button aria-label="Copy WhatsApp message" className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700" onClick={() => void copyWhatsAppMessage(report)} title="Copy WhatsApp message" type="button">{copiedReportId === report.id ? <Check size={14} /> : <Copy size={14} />}{copiedReportId === report.id ? 'Copied' : 'Copy WhatsApp Message'}</button></div>
+                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-slate-500"><span>{report.batchName}</span>{!isCoachMode ? <span>{report.coachName ?? 'Coach not assigned'}</span> : null}<span>{report.studentsPresentIds?.length ?? 0} present</span></div>
+                      <div className="mt-4 flex flex-wrap gap-2"><button className="min-h-9 rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button><button className="min-h-9 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => openEdit(report)} type="button">Edit</button><button aria-label="Copy WhatsApp message" className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700" onClick={() => void copyWhatsAppMessage(report)} title="Copy WhatsApp message" type="button">{copiedReportId === report.id ? <Check size={14} /> : <Copy size={14} />}{copiedReportId === report.id ? 'Copied' : 'Copy'}</button></div>
                     </article>
                   ))}
                 </div>
