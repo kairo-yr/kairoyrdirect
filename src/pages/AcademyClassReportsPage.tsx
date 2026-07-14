@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { Edit, Eye, FileText, Plus, RotateCcw, Save } from 'lucide-react';
+import { Check, Copy, Edit, Eye, FileText, Plus, RotateCcw, Save } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -16,6 +16,7 @@ import { getCoachWorkspace } from '../lib/coachWorkspaceApi';
 import { currentMonthValue, formatDateOnly, groupReportsByBatch, monthDateRange } from '../lib/attendanceReportHistory';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 import { createAuditLog } from '../utils/superAdminActions';
+import { findHomeworkLink, generateClassReportWhatsAppMessage } from '../utils/classReportWhatsApp';
 
 type ReportMode = 'academy' | 'coach';
 type ReportStatus = 'draft' | 'submitted';
@@ -162,6 +163,8 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   const [saving, setSaving] = useState(false);
   const [createReportOpen, setCreateReportOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [copiedReportId, setCopiedReportId] = useState<string | null>(null);
+  const [manualCopyMessage, setManualCopyMessage] = useState('');
 
   useRefreshOnFocus(() => setReloadToken((value) => value + 1), Boolean(academyId) && !createReportOpen && !editReport && !saving);
 
@@ -458,6 +461,50 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
     }
   };
 
+  const getPresentStudentNames = (report: ClassReportRecord) => {
+    const attendance = attendanceRecords.find((record) =>
+      (report.attendanceId && record.id === report.attendanceId)
+      || (record.batchId === report.batchId && record.date === report.date),
+    );
+    if (attendance?.students) {
+      return attendance.students
+        .filter((student) => student.status === 'present')
+        .map((student) => student.studentName || studentsById.get(student.studentId)?.name || '')
+        .filter(Boolean);
+    }
+    if (Array.isArray(report.studentsPresentIds)) {
+      const names = report.studentsPresentIds.map((id) => studentsById.get(id)?.name).filter((name): name is string => Boolean(name));
+      if (names.length) return names;
+    }
+    return null;
+  };
+
+  const copyWhatsAppMessage = async (report: ClassReportRecord) => {
+    const whatsappMessage = generateClassReportWhatsAppMessage({
+      date: report.date,
+      studentsPresent: getPresentStudentNames(report),
+      topics: report.topicCovered,
+      studyDetails: report.classSummary,
+      homeworkLink: findHomeworkLink(report.homeworkGiven),
+      batchName: report.batchName,
+      coachName: report.coachName,
+    });
+    setError('');
+    setMessage('');
+    try {
+      await navigator.clipboard.writeText(whatsappMessage);
+      setCopiedReportId(report.id);
+      setMessage('WhatsApp report copied');
+      window.setTimeout(() => {
+        setCopiedReportId((current) => current === report.id ? null : current);
+        setMessage((current) => current === 'WhatsApp report copied' ? '' : current);
+      }, 2000);
+    } catch {
+      setError('Clipboard access failed. Copy the WhatsApp message manually below.');
+      setManualCopyMessage(whatsappMessage);
+    }
+  };
+
   if (isCoachMode && coachResolutionLoading) {
     return <EmptyState title="Loading coach profile" description="Verifying your coach membership and academy assignments." />;
   }
@@ -645,7 +692,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
                       <p className="mt-2 text-sm font-semibold text-slate-600">{report.topicCovered}</p>
                       {report.classSummary ? <p className="mt-2 line-clamp-2 text-sm text-slate-500">{report.classSummary}</p> : null}
                       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-slate-500"><span>{report.coachName ?? 'Coach not assigned'}</span><span>{report.studentsPresentIds.length} present · {report.studentsAbsentIds.length} absent</span></div>
-                      <div className="mt-4 flex gap-2"><button className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button><button className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => openEdit(report)} type="button">Edit</button></div>
+                      <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button><button className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => openEdit(report)} type="button">Edit</button><button aria-label="Copy WhatsApp message" className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700" onClick={() => void copyWhatsAppMessage(report)} title="Copy WhatsApp message" type="button">{copiedReportId === report.id ? <Check size={14} /> : <Copy size={14} />}{copiedReportId === report.id ? 'Copied' : 'Copy WhatsApp Message'}</button></div>
                     </article>
                   ))}
                 </div>
@@ -699,6 +746,16 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      <Modal title="Copy WhatsApp Message" description="Clipboard access was unavailable. Select and copy the message below." open={Boolean(manualCopyMessage)} onClose={() => setManualCopyMessage('')}>
+        <textarea
+          aria-label="WhatsApp class report message"
+          className="min-h-80 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-navy outline-none focus:border-directBlue focus:ring-4 focus:ring-blue-100"
+          onFocus={(event) => event.currentTarget.select()}
+          readOnly
+          value={manualCopyMessage}
+        />
       </Modal>
 
       <Modal title="Edit Report" description={editReport ? `${editReport.batchName} · ${editReport.date}` : undefined} open={Boolean(editReport)} onClose={() => setEditReport(null)}>
