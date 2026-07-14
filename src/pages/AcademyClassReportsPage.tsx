@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { Edit, Eye, FileText, Save } from 'lucide-react';
+import { Edit, Eye, FileText, Plus, RotateCcw, Save } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
-import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { FormSelect } from '../components/ui/FormSelect';
@@ -10,8 +10,10 @@ import { Modal } from '../components/ui/Modal';
 import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrentCoach } from '../hooks/useCurrentCoach';
+import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import { db } from '../lib/firebase';
 import { getCoachWorkspace } from '../lib/coachWorkspaceApi';
+import { currentMonthValue, formatDateOnly, groupReportsByBatch, monthDateRange } from '../lib/attendanceReportHistory';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 import { createAuditLog } from '../utils/superAdminActions';
 
@@ -132,6 +134,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   const { userProfile } = useAuth();
   const isCoachMode = mode === 'coach';
   const { coach: currentCoach, error: coachResolutionError, loading: coachResolutionLoading } = useCurrentCoach(isCoachMode);
+  const [searchParams, setSearchParams] = useSearchParams();
   const academyId = isCoachMode ? currentCoach?.academy_id ?? userProfile?.academyId : userProfile?.academyId;
   const coachId = currentCoach?.id ?? null;
   const [batches, setBatches] = useState<BatchRecord[]>([]);
@@ -143,7 +146,8 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   const [form, setForm] = useState<ReportForm>(emptyForm);
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
-  const [filterBatchId, setFilterBatchId] = useState('');
+  const [filterMonth, setFilterMonth] = useState(currentMonthValue());
+  const [filterBatchId, setFilterBatchId] = useState(searchParams.get('batchId') ?? '');
   const [filterCoachId, setFilterCoachId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
@@ -153,8 +157,13 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
   const [editStatus, setEditStatus] = useState<ReportStatus>('draft');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [createReportOpen, setCreateReportOpen] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useRefreshOnFocus(() => setReloadToken((value) => value + 1), Boolean(academyId) && !createReportOpen && !editReport && !saving);
 
   const selectedBatch = batches.find((batch) => batch.id === selectedBatchId);
   const matchingAttendance = attendanceRecords.find((record) => record.batchId === selectedBatchId && record.date === selectedDate);
@@ -182,6 +191,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
         return;
       }
       setLoading(true);
+      setLoadError('');
       try {
         const attendanceSnapshot = isCoachMode && coachId
           ? await getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', coachId)))
@@ -212,15 +222,20 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
             .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
             .filter((record) => !isCoachMode || loadedBatches.some((batch) => batch.id === record.batchId)),
         );
-        setSelectedBatchId((current) => current || loadedBatches[0]?.id || '');
+        const requestedBatchId = searchParams.get('batchId') ?? '';
+        const initialBatchId = loadedBatches.some((batch) => batch.id === requestedBatchId) ? requestedBatchId : loadedBatches[0]?.id ?? '';
+        setSelectedBatchId((current) => loadedBatches.some((batch) => batch.id === current) ? current : initialBatchId);
+        setFilterBatchId((current) => loadedBatches.some((batch) => batch.id === current) ? current : requestedBatchId);
         await loadReports(loadedBatches);
+      } catch (caught) {
+        setLoadError(caught instanceof Error ? caught.message : 'Could not load class report history.');
       } finally {
         setLoading(false);
       }
     };
 
     void loadPage();
-  }, [academyId, coachId, isCoachMode]);
+  }, [academyId, coachId, isCoachMode, reloadToken]);
 
   useEffect(() => {
     if (!selectedBatchId) {
@@ -250,9 +265,13 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
 
   const filteredReports = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
+    const monthRange = monthDateRange(filterMonth);
+    const hasCustomRange = Boolean(filterStartDate || filterEndDate);
+    const effectiveStart = hasCustomRange ? filterStartDate : monthRange.start;
+    const effectiveEnd = hasCustomRange ? filterEndDate : monthRange.end;
     return reports.filter((report) => {
-      const matchesStart = filterStartDate ? report.date >= filterStartDate : true;
-      const matchesEnd = filterEndDate ? report.date <= filterEndDate : true;
+      const matchesStart = effectiveStart ? report.date >= effectiveStart : true;
+      const matchesEnd = effectiveEnd ? report.date <= effectiveEnd : true;
       const matchesBatch = filterBatchId ? report.batchId === filterBatchId : true;
       const matchesCoach = filterCoachId ? report.coachId === filterCoachId : true;
       const matchesStatus = filterStatus ? report.status === filterStatus : true;
@@ -266,7 +285,29 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
       const matchesSearch = normalizedSearch ? haystack.includes(normalizedSearch) : true;
       return matchesStart && matchesEnd && matchesBatch && matchesCoach && matchesStatus && matchesSearch;
     });
-  }, [filterBatchId, filterCoachId, filterEndDate, filterStartDate, filterStatus, reports, search]);
+  }, [filterBatchId, filterCoachId, filterEndDate, filterMonth, filterStartDate, filterStatus, reports, search]);
+  const groupedReports = useMemo(() => groupReportsByBatch(filteredReports), [filteredReports]);
+
+  const changeBatchFilter = (batchId: string) => {
+    setFilterBatchId(batchId);
+    if (batchId) setSelectedBatchId(batchId);
+    const next = new URLSearchParams(searchParams);
+    if (batchId) next.set('batchId', batchId); else next.delete('batchId');
+    setSearchParams(next, { replace: true });
+  };
+
+  const clearFilters = () => {
+    setFilterBatchId('');
+    setFilterMonth(currentMonthValue());
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setFilterCoachId('');
+    setFilterStatus('');
+    setSearch('');
+    const next = new URLSearchParams(searchParams);
+    next.delete('batchId');
+    setSearchParams(next, { replace: true });
+  };
 
   const updateFormField = (field: keyof ReportForm, value: string) => {
     setMessage('');
@@ -301,6 +342,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
       setError('Title and topic covered are required.');
       return;
     }
+    if (existingReport && !window.confirm(`Update the existing report for ${selectedBatch.name} on ${formatDateOnly(selectedDate)}?`)) return;
     setSaving(true);
     setError('');
     try {
@@ -359,6 +401,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
       });
       await loadReports(batches);
       setMessage(reportId ? 'Class report updated.' : 'Class report saved.');
+      setCreateReportOpen(false);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to save class report.');
     } finally {
@@ -441,7 +484,10 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
             Create lesson summaries, homework notes, and student performance records connected to batch attendance.
           </p>
         </div>
-        <Badge className="bg-blue-50 text-directBlue">{isCoachMode ? 'Coach scoped' : 'Academy scoped'}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="bg-blue-50 text-directBlue">{isCoachMode ? 'Coach scoped' : 'Academy scoped'}</Badge>
+          <button className="inline-flex items-center gap-2 rounded-2xl bg-directBlue px-5 py-3 text-sm font-black text-white" onClick={() => setCreateReportOpen(true)} type="button"><Plus size={18} /> Create Report</button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -453,13 +499,14 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
       {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div> : null}
       {message ? <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-directBlue">{message}</div> : null}
 
+      {createReportOpen ? (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-black text-navy">{existingReport ? 'Edit Class Report' : 'Create Class Report'}</h2>
             <p className="mt-1 text-sm leading-6 text-slate-500">One submitted report is kept per batch and date for now.</p>
           </div>
-          {existingReport ? <Badge className="bg-amber-50 text-amber-700">Existing report</Badge> : null}
+          <div className="flex items-center gap-2">{existingReport ? <Badge className="bg-amber-50 text-amber-700">Existing report</Badge> : null}<button className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600" onClick={() => setCreateReportOpen(false)} type="button">Close</button></div>
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -555,14 +602,16 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
           </button>
         </div>
       </section>
+      ) : null}
 
       <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <h2 className="text-xl font-black text-navy">{isCoachMode ? 'My Class Reports' : 'Reports History'}</h2>
-          <div className="grid w-full gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <div><h2 className="text-xl font-black text-navy">{isCoachMode ? 'My Class Reports' : 'Reports History'}</h2><p className="mt-1 text-sm text-slate-500">Batch-first history, newest reports first.</p></div>
+          <div className="grid w-full gap-3 md:grid-cols-3 xl:grid-cols-7">
+            <FormInput label="Month" type="month" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)} />
             <FormInput label="Start" type="date" value={filterStartDate} onChange={(event) => setFilterStartDate(event.target.value)} />
             <FormInput label="End" type="date" value={filterEndDate} onChange={(event) => setFilterEndDate(event.target.value)} />
-            <FormSelect label="Batch" value={filterBatchId} onChange={(event) => setFilterBatchId(event.target.value)} options={[{ label: 'All batches', value: '' }, ...batches.map((batch) => ({ label: batch.name, value: batch.id }))]} />
+            <FormSelect label="Batch" value={filterBatchId} onChange={(event) => changeBatchFilter(event.target.value)} options={[{ label: 'All batches', value: '' }, ...batches.map((batch) => ({ label: batch.name, value: batch.id }))]} />
             <FormSelect label="Coach" value={filterCoachId} onChange={(event) => setFilterCoachId(event.target.value)} options={[{ label: 'All coaches', value: '' }, ...coachOptions]} disabled={isCoachMode} />
             <FormSelect
               label="Status"
@@ -575,31 +624,34 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
               ]}
             />
             <FormInput label="Search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Topic, title, student" />
+            <div className="flex items-end"><button className="inline-flex w-full items-center justify-center gap-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-600" onClick={clearFilters} type="button"><RotateCcw size={15} /> Clear</button></div>
           </div>
         </div>
-        {filteredReports.length === 0 ? (
+        {loading ? (
+          <EmptyState title="Loading report history" description="Checking reports for your permitted batches." />
+        ) : loadError ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700"><span>{loadError}</span><button className="rounded-xl bg-white px-3 py-2 text-xs font-black" onClick={() => setReloadToken((value) => value + 1)} type="button">Retry</button></div>
+        ) : filteredReports.length === 0 ? (
           <EmptyState title={isCoachMode ? 'No class reports created yet' : 'No class reports found'} description="Class reports will appear here after they are saved." />
         ) : (
-          <DataTable columns={['Date', 'Batch', 'Coach', 'Title / Topic', 'Status', 'Present / Absent', 'Created By', 'Created', 'Actions']}>
-            {filteredReports.map((report) => (
-              <tr className="border-t border-slate-100" key={report.id}>
-                <td className="px-5 py-4 font-black text-navy">{report.date}</td>
-                <td className="px-5 py-4 text-slate-600">{report.batchName}</td>
-                <td className="px-5 py-4 text-slate-600">{report.coachName ?? 'Not assigned'}</td>
-                <td className="px-5 py-4 text-slate-600"><span className="font-black text-navy">{report.title}</span><br />{report.topicCovered}</td>
-                <td className="px-5 py-4"><Badge className={report.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>{report.status}</Badge></td>
-                <td className="px-5 py-4 text-slate-600">{report.studentsPresentIds.length} / {report.studentsAbsentIds.length}</td>
-                <td className="px-5 py-4 text-slate-600">{report.createdByName}</td>
-                <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(report.createdAt)}</td>
-                <td className="px-5 py-4">
-                  <div className="flex gap-2">
-                    <button aria-label="View report" className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button>
-                    <button aria-label="Edit report" className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => openEdit(report)} type="button">Edit</button>
-                  </div>
-                </td>
-              </tr>
+          <div className="space-y-5">
+            {groupedReports.map((group) => (
+              <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-card md:p-5" key={group.batchId}>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-lg font-black text-navy">{group.batchName}</h3><p className="text-sm text-slate-500">{group.reports.length} report{group.reports.length === 1 ? '' : 's'} · Latest {formatDateOnly(group.reports[0]?.date ?? '')}</p></div></div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {group.reports.map((report) => (
+                    <article className="rounded-2xl border border-slate-200 p-4" key={report.id}>
+                      <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs font-black uppercase text-directBlue">{formatDateOnly(report.date)}</div><h4 className="mt-1 font-black text-navy">{report.title}</h4></div><Badge className={report.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>{report.status}</Badge></div>
+                      <p className="mt-2 text-sm font-semibold text-slate-600">{report.topicCovered}</p>
+                      {report.classSummary ? <p className="mt-2 line-clamp-2 text-sm text-slate-500">{report.classSummary}</p> : null}
+                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-slate-500"><span>{report.coachName ?? 'Coach not assigned'}</span><span>{report.studentsPresentIds.length} present · {report.studentsAbsentIds.length} absent</span></div>
+                      <div className="mt-4 flex gap-2"><button className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button><button className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => openEdit(report)} type="button">Edit</button></div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             ))}
-          </DataTable>
+          </div>
         )}
       </section>
 

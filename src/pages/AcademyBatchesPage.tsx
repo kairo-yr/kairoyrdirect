@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Edit3, Eye, Plus, RotateCcw, UserPlus, UserX } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -362,6 +363,10 @@ export function AcademyBatchesPage() {
                 <div className="mt-1 font-black text-navy">{value}</div>
               </div>
             ))}
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <Link className="rounded-2xl bg-directBlue px-4 py-3 text-center text-sm font-black text-white" onClick={() => setViewing(null)} to={`/academy/attendance?batchId=${viewing.id}`}>View Attendance</Link>
+              <Link className="rounded-2xl border border-slate-200 px-4 py-3 text-center text-sm font-black text-navy" onClick={() => setViewing(null)} to={`/academy/class-reports?batchId=${viewing.id}`}>View Class Reports</Link>
+            </div>
           </div>
         ) : <EmptyState title="Batch not found" description="The selected batch could not be loaded." />}
       </Modal>

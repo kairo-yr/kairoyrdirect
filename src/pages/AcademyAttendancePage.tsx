@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { CalendarCheck, ClipboardList, Save, Search } from 'lucide-react';
+import { CalendarCheck, ClipboardList, Eye, Plus, RotateCcw, Save, Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -10,8 +11,17 @@ import { Modal } from '../components/ui/Modal';
 import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrentCoach } from '../hooks/useCurrentCoach';
+import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import { db } from '../lib/firebase';
 import { getCoachWorkspace } from '../lib/coachWorkspaceApi';
+import {
+  currentMonthValue,
+  formatDateOnly,
+  getAttendanceSessions,
+  getBatchAttendanceSummary,
+  monthDateRange,
+  type StudentAttendanceSummary,
+} from '../lib/attendanceReportHistory';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 import { createAuditLog } from '../utils/superAdminActions';
 
@@ -94,6 +104,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
   const { userProfile } = useAuth();
   const isCoachMode = mode === 'coach';
   const { coach: currentCoach, error: coachResolutionError, loading: coachResolutionLoading } = useCurrentCoach(isCoachMode);
+  const [searchParams, setSearchParams] = useSearchParams();
   const academyId = isCoachMode ? currentCoach?.academy_id ?? userProfile?.academyId : userProfile?.academyId;
   const coachId = currentCoach?.id ?? null;
   const [batches, setBatches] = useState<BatchRecord[]>([]);
@@ -103,16 +114,23 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [status, setStatus] = useState<AttendanceStatus>('submitted');
   const [rows, setRows] = useState<AttendanceStudent[]>([]);
-  const [filterDate, setFilterDate] = useState('');
-  const [filterBatchId, setFilterBatchId] = useState('');
+  const [overviewBatchId, setOverviewBatchId] = useState(searchParams.get('batchId') ?? '');
+  const [month, setMonth] = useState(currentMonthValue());
+  const [studentSearch, setStudentSearch] = useState('');
   const [filterCoachId, setFilterCoachId] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState<StudentAttendanceSummary | null>(null);
+  const [markAttendanceOpen, setMarkAttendanceOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
   const [editingRows, setEditingRows] = useState<AttendanceStudent[]>([]);
   const [editingStatus, setEditingStatus] = useState<AttendanceStatus>('submitted');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useRefreshOnFocus(() => setReloadToken((value) => value + 1), Boolean(academyId) && !markAttendanceOpen && !editingRecord && !saving);
 
   const selectedBatch = batches.find((batch) => batch.id === selectedBatchId);
   const existingForSelection = attendanceRecords.find((record) => record.batchId === selectedBatchId && record.date === selectedDate);
@@ -137,6 +155,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
         return;
       }
       setLoading(true);
+      setLoadError('');
       try {
         let loadedBatches: BatchRecord[];
         let loadedStudents: Map<string, StudentRecord>;
@@ -159,15 +178,20 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
         }
         setBatches(loadedBatches);
         setStudentsById(loadedStudents);
-        setSelectedBatchId((current) => current || loadedBatches[0]?.id || '');
+        const requestedBatchId = searchParams.get('batchId') ?? '';
+        const initialBatchId = loadedBatches.some((batch) => batch.id === requestedBatchId) ? requestedBatchId : loadedBatches[0]?.id ?? '';
+        setOverviewBatchId((current) => loadedBatches.some((batch) => batch.id === current) ? current : initialBatchId);
+        setSelectedBatchId((current) => loadedBatches.some((batch) => batch.id === current) ? current : initialBatchId);
         await loadAttendance(loadedBatches);
+      } catch (caught) {
+        setLoadError(caught instanceof Error ? caught.message : 'Could not load attendance history.');
       } finally {
         setLoading(false);
       }
     };
 
     void loadPage();
-  }, [academyId, coachId, isCoachMode]);
+  }, [academyId, coachId, isCoachMode, reloadToken]);
 
   useEffect(() => {
     if (!selectedBatchId) {
@@ -193,15 +217,21 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
     return Array.from(coaches, ([value, label]) => ({ value, label }));
   }, [batches]);
 
+  const period = useMemo(() => monthDateRange(month), [month]);
+  const selectedOverviewBatch = batches.find((batch) => batch.id === overviewBatchId);
+  const attendanceSummary = useMemo(() => {
+    const currentStudents = (selectedOverviewBatch?.studentIds ?? [])
+      .map((studentId) => studentsById.get(studentId))
+      .filter((student): student is StudentRecord => Boolean(student));
+    const normalizedSearch = studentSearch.trim().toLowerCase();
+    return getBatchAttendanceSummary(attendanceRecords, overviewBatchId, period.start, period.end, currentStudents)
+      .filter((student) => !normalizedSearch || student.studentName.toLowerCase().includes(normalizedSearch));
+  }, [attendanceRecords, overviewBatchId, period.end, period.start, selectedOverviewBatch?.studentIds, studentSearch, studentsById]);
   const filteredHistory = useMemo(
-    () =>
-      attendanceRecords.filter((record) => {
-        const matchesDate = filterDate ? record.date === filterDate : true;
-        const matchesBatch = filterBatchId ? record.batchId === filterBatchId : true;
-        const matchesCoach = filterCoachId ? record.coachId === filterCoachId : true;
-        return matchesDate && matchesBatch && matchesCoach;
-      }),
-    [attendanceRecords, filterBatchId, filterCoachId, filterDate],
+    () => getAttendanceSessions(attendanceRecords, overviewBatchId, period.start, period.end)
+      .filter((record) => !filterCoachId || record.coachId === filterCoachId)
+      .slice(0, 50),
+    [attendanceRecords, filterCoachId, overviewBatchId, period.end, period.start],
   );
 
   const todaySubmittedCount = attendanceRecords.filter((record) => record.date === getTodayDate() && record.status === 'submitted').length;
@@ -214,6 +244,26 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
 
   const setRowNote = (studentId: string, note: string) => {
     setRows((current) => current.map((row) => (row.studentId === studentId ? { ...row, note } : row)));
+  };
+
+  const setAllRows = (nextStatus: StudentAttendanceStatus) => {
+    setRows((current) => current.map((row) => ({ ...row, status: nextStatus })));
+  };
+
+  const resetRows = () => {
+    if (existingForSelection) {
+      setRows(existingForSelection.students ?? []);
+    } else {
+      setRows(studentRowsForBatch(selectedBatch, studentsById));
+    }
+  };
+
+  const changeOverviewBatch = (batchId: string) => {
+    setOverviewBatchId(batchId);
+    setSelectedBatchId(batchId);
+    const next = new URLSearchParams(searchParams);
+    if (batchId) next.set('batchId', batchId); else next.delete('batchId');
+    setSearchParams(next, { replace: true });
   };
 
   const setEditingRowStatus = (studentId: string, nextStatus: StudentAttendanceStatus) => {
@@ -230,6 +280,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
       setError('No students found in this batch.');
       return;
     }
+    if (existingForSelection && !window.confirm(`Update attendance for ${selectedBatch.name} on ${formatDateOnly(selectedDate)}?`)) return;
     setSaving(true);
     setError('');
     try {
@@ -276,6 +327,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
       });
       await loadAttendance(batches);
       setMessage(recordId ? 'Attendance updated.' : 'Attendance submitted.');
+      setMarkAttendanceOpen(false);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to save attendance.');
     } finally {
@@ -355,7 +407,12 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
             Mark batch-wise attendance, review class history, and keep academy records tied to the right batch and date.
           </p>
         </div>
-        <Badge className="bg-blue-50 text-directBlue">{isCoachMode ? 'Coach scoped' : 'Academy scoped'}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge className="bg-blue-50 text-directBlue">{isCoachMode ? 'Coach scoped' : 'Academy scoped'}</Badge>
+          <button className="inline-flex items-center gap-2 rounded-2xl bg-directBlue px-5 py-3 text-sm font-black text-white" onClick={() => setMarkAttendanceOpen(true)} type="button">
+            <Plus size={18} /> Mark Attendance
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -367,6 +424,47 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
       {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div> : null}
       {message ? <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-directBlue">{message}</div> : null}
 
+      <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-card md:p-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-black text-navy">Batch Attendance Overview</h2>
+            <p className="mt-1 text-sm text-slate-500">Student totals for the selected batch and month.</p>
+          </div>
+          <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-[240px_170px_240px]">
+            <FormSelect label="Batch" value={overviewBatchId} onChange={(event) => changeOverviewBatch(event.target.value)} options={[{ label: 'Select batch', value: '' }, ...batches.map((batch) => ({ label: batch.name, value: batch.id }))]} />
+            <FormInput label="Month" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+            <FormInput label="Student search" value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search this batch" />
+          </div>
+        </div>
+
+        {loading ? (
+          <EmptyState title="Loading attendance" description="Checking batch history and students." />
+        ) : loadError ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700"><span>{loadError}</span><button className="rounded-xl bg-white px-3 py-2 text-xs font-black" onClick={() => setReloadToken((value) => value + 1)} type="button">Retry</button></div>
+        ) : !overviewBatchId ? (
+          <EmptyState title="Select a batch" description="Choose a batch to inspect attendance history." />
+        ) : filteredHistory.length === 0 ? (
+          <EmptyState title="No attendance in this period" description="No attendance has been recorded for this batch during the selected period." />
+        ) : attendanceSummary.length === 0 ? (
+          <EmptyState title="No matching students" description="Try a different student search." />
+        ) : (
+          <DataTable columns={['Student', 'Present', 'Absent', 'Classes', 'Attendance', 'Last attended', 'Action']}>
+            {attendanceSummary.map((student) => (
+              <tr className="border-t border-slate-100" key={student.studentId}>
+                <td className="sticky left-0 bg-white px-5 py-4 font-black text-navy">{student.studentName}</td>
+                <td className="px-5 py-4 text-emerald-700">{student.presentCount}</td>
+                <td className="px-5 py-4 text-rose-700">{student.absentCount}</td>
+                <td className="px-5 py-4 text-slate-600">{student.totalClasses}</td>
+                <td className="px-5 py-4"><Badge className={student.percentage !== null && student.percentage >= 75 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>{student.percentage === null ? 'No classes' : `${student.percentage}%`}</Badge></td>
+                <td className="px-5 py-4 text-slate-600">{student.lastAttendedDate ? formatDateOnly(student.lastAttendedDate) : 'Not attended'}</td>
+                <td className="px-5 py-4"><button className="inline-flex items-center gap-1 rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setSelectedStudent(student)} type="button"><Eye size={14} /> Details</button></td>
+              </tr>
+            ))}
+          </DataTable>
+        )}
+      </section>
+
+      {markAttendanceOpen ? (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -393,6 +491,13 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
               { label: 'Draft', value: 'draft' },
             ]}
           />
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700" onClick={() => setAllRows('present')} type="button">Mark all present</button>
+          <button className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-black text-rose-700" onClick={() => setAllRows('absent')} type="button">Mark all absent</button>
+          <button className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700" onClick={resetRows} type="button"><RotateCcw size={14} /> Reset</button>
+          <button className="ml-auto rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600" onClick={() => setMarkAttendanceOpen(false)} type="button">Close</button>
         </div>
 
         <div className="mt-5 space-y-3">
@@ -442,18 +547,12 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
           </button>
         </div>
       </section>
+      ) : null}
 
-      <section>
+      {!loadError ? <section>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <h2 className="text-xl font-black text-navy">Attendance History</h2>
-          <div className="grid w-full gap-3 md:w-auto md:grid-cols-3">
-            <FormInput label="Date" type="date" value={filterDate} onChange={(event) => setFilterDate(event.target.value)} />
-            <FormSelect
-              label="Batch"
-              value={filterBatchId}
-              onChange={(event) => setFilterBatchId(event.target.value)}
-              options={[{ label: 'All batches', value: '' }, ...batches.map((batch) => ({ label: batch.name, value: batch.id }))]}
-            />
+          <div><h2 className="text-xl font-black text-navy">Session History</h2><p className="mt-1 text-sm text-slate-500">Newest 50 sessions in the selected period.</p></div>
+          <div className="grid w-full gap-3 md:w-auto md:grid-cols-1">
             <FormSelect
               label="Coach"
               value={filterCoachId}
@@ -469,7 +568,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
           <DataTable columns={['Date', 'Batch', 'Coach', 'Present', 'Absent', 'Total', 'Marked By', 'Created', 'Action']}>
             {filteredHistory.map((record) => (
               <tr className="border-t border-slate-100" key={record.id}>
-                <td className="px-5 py-4 font-black text-navy">{record.date}</td>
+                <td className="px-5 py-4 font-black text-navy">{formatDateOnly(record.date)}</td>
                 <td className="px-5 py-4 text-slate-600">{record.batchName}</td>
                 <td className="px-5 py-4 text-slate-600">{record.coachName ?? 'Not assigned'}</td>
                 <td className="px-5 py-4 text-slate-600">{record.presentCount}</td>
@@ -486,7 +585,30 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
             ))}
           </DataTable>
         )}
-      </section>
+      </section> : null}
+
+      <Modal title={selectedStudent?.studentName ?? 'Student attendance'} description={`${formatDateOnly(period.start)} – ${formatDateOnly(period.end)}`} open={Boolean(selectedStudent)} onClose={() => setSelectedStudent(null)}>
+        {selectedStudent ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                ['Present', String(selectedStudent.presentCount)],
+                ['Absent', String(selectedStudent.absentCount)],
+                ['Classes', String(selectedStudent.totalClasses)],
+                ['Attendance', selectedStudent.percentage === null ? 'No classes' : `${selectedStudent.percentage}%`],
+              ].map(([label, value]) => <div className="rounded-2xl bg-slate-50 p-3" key={label}><div className="text-xs font-black uppercase text-slate-500">{label}</div><div className="mt-1 text-lg font-black text-navy">{value}</div></div>)}
+            </div>
+            <div className="space-y-2">
+              {selectedStudent.history.map((entry) => (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 p-3" key={`${entry.sessionId}-${entry.date}`}>
+                  <div><div className="font-black text-navy">{formatDateOnly(entry.date)}</div>{entry.note ? <div className="text-sm text-slate-500">{entry.note}</div> : null}</div>
+                  <Badge className={entry.status === 'present' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}>{entry.status}</Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         description={editingRecord ? `${editingRecord.batchName} · ${editingRecord.date}` : undefined}
