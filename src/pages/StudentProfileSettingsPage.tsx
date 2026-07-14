@@ -5,6 +5,7 @@ import { FormInput } from '../components/ui/FormInput';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabaseClient';
 
 type StudentProfile = {
   id: string;
@@ -99,11 +100,14 @@ export function StudentProfileSettingsPage() {
         parentEmail: form.guardianEmail.trim().toLowerCase(),
         updatedAt: serverTimestamp(),
       });
-      await updateDoc(doc(db, 'users', userProfile.uid), {
-        name: form.name.trim(),
-        phone: form.phone.trim(),
-        updatedAt: serverTimestamp(),
-      });
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          full_name: form.name.trim(),
+          phone: form.phone.trim() || null,
+        })
+        .eq('id', userProfile.uid);
+      if (profileError) throw profileError;
       await refreshUserProfile();
       setStudent((current) => current ? {
         ...current,

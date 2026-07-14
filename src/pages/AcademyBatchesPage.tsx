@@ -25,6 +25,7 @@ import { getCoachesByAcademy, type Coach } from '../lib/coachApi';
 import { getStudentsByAcademy, type Student } from '../lib/studentApi';
 import { statusStyles } from '../utils/badgeStyles';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 type BatchForm = {
   name: string;
@@ -74,16 +75,17 @@ export function AcademyBatchesPage() {
   const [form, setForm] = useState<BatchForm>(initialForm);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [savingBatch, setSavingBatch] = useState(false);
 
   const activeCoaches = useMemo(() => coaches.filter((coach) => coach.status === 'active'), [coaches]);
   const activeStudents = useMemo(() => students.filter((student) => student.status === 'active'), [students]);
 
-  const loadBatches = async () => {
+  const loadBatches = async (showLoading = true) => {
     if (!academyId || userProfile?.app_role !== 'academy_admin') {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError('');
     try {
       const [loadedBatches, loadedCoaches, loadedStudents] = await Promise.all([
@@ -105,6 +107,8 @@ export function AcademyBatchesPage() {
     void loadBatches();
   }, [academyId, userProfile?.app_role]);
 
+  useRefreshOnFocus(() => loadBatches(false), Boolean(academyId));
+
   const openCreateModal = () => {
     setEditing(null);
     setForm(initialForm);
@@ -123,6 +127,12 @@ export function AcademyBatchesPage() {
       notes: batch.notes ?? '',
     });
     setModalOpen(true);
+  };
+
+  const closeBatchModal = () => {
+    setModalOpen(false);
+    setEditing(null);
+    setForm(initialForm);
   };
 
   const openAssignModal = async (batch: Batch) => {
@@ -146,12 +156,15 @@ export function AcademyBatchesPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (savingBatch) return;
     if (!academyId) return;
     if (!form.name.trim()) {
       setError('Batch name is required.');
       return;
     }
 
+    const batchBeingEdited = editing;
+    setSavingBatch(true);
     setError('');
     setMessage('');
     try {
@@ -166,19 +179,39 @@ export function AcademyBatchesPage() {
         notes: form.notes || null,
       };
 
-      if (editing) {
-        await updateBatch(editing.id, payload);
-        setMessage('Batch updated.');
+      if (batchBeingEdited) {
+        const updatedBatch = await updateBatch(batchBeingEdited.id, payload);
+        setBatches((current) => current.map((batch) => (
+          batch.id === updatedBatch.id
+            ? { ...updatedBatch, student_count: batch.student_count ?? 0 }
+            : batch
+        )));
+        setViewing((current) => current?.id === updatedBatch.id
+          ? { ...updatedBatch, student_count: current.student_count ?? 0 }
+          : current);
+        closeBatchModal();
+        setMessage('Batch updated successfully');
+        await loadBatches(false);
       } else {
         await createBatch(payload);
-        setMessage('Batch created.');
+        closeBatchModal();
+        setMessage('Batch created successfully');
+        await loadBatches(false);
       }
-      setForm(initialForm);
-      setEditing(null);
-      setModalOpen(false);
-      await loadBatches();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save batch.');
+      if (import.meta.env.DEV) {
+        const supabaseError = caught as Partial<{ code: string; message: string; details: string; hint: string }>;
+        console.error(batchBeingEdited ? 'Could not update batch.' : 'Could not create batch.', {
+          batchId: batchBeingEdited?.id,
+          code: supabaseError.code,
+          message: supabaseError.message,
+          details: supabaseError.details,
+          hint: supabaseError.hint,
+        });
+      }
+      setError(batchBeingEdited ? 'Could not update batch' : 'Could not create batch');
+    } finally {
+      setSavingBatch(false);
     }
   };
 
@@ -266,7 +299,7 @@ export function AcademyBatchesPage() {
         </DataTable>
       )}
 
-      <Modal title={editing ? 'Edit Batch' : 'Create Batch'} description="Only active coaches from this academy can be assigned." open={modalOpen} onClose={() => setModalOpen(false)}>
+      <Modal title={editing ? 'Edit Batch' : 'Create Batch'} description="Only active coaches from this academy can be assigned." open={modalOpen} onClose={closeBatchModal}>
         <form className="grid gap-4" onSubmit={handleSubmit}>
           <FormInput label="Batch name" value={form.name} onChange={(event) => updateField('name', event.target.value)} />
           <FormSelect label="Level" value={form.level} onChange={(event) => updateField('level', event.target.value)} options={[
@@ -282,8 +315,10 @@ export function AcademyBatchesPage() {
           <FormInput label="Max students optional" type="number" value={form.max_students} onChange={(event) => updateField('max_students', event.target.value)} />
           <FormInput label="Notes optional" value={form.notes} onChange={(event) => updateField('notes', event.target.value)} />
           <div className="flex justify-end gap-3">
-            <button className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-black text-slate-600" type="button" onClick={() => setModalOpen(false)}>Cancel</button>
-            <button className="rounded-2xl bg-directBlue px-5 py-3 text-sm font-black text-white" type="submit">{editing ? 'Save Batch' : 'Create Batch'}</button>
+            <button className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-black text-slate-600 disabled:opacity-60" disabled={savingBatch} type="button" onClick={closeBatchModal}>Cancel</button>
+            <button className="rounded-2xl bg-directBlue px-5 py-3 text-sm font-black text-white disabled:opacity-60" disabled={savingBatch} type="submit">
+              {savingBatch ? (editing ? 'Saving Batch...' : 'Creating Batch...') : (editing ? 'Save Batch' : 'Create Batch')}
+            </button>
           </div>
         </form>
       </Modal>

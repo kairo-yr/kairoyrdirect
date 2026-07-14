@@ -481,18 +481,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isInviteExpired(invite.expiresAt)) throw new Error('This invite has expired.');
     const { db, doc, serverTimestamp, updateDoc } = await loadFirestoreDataLayer();
 
-    const linkedFields = {
-      linkedCoachId: null,
-      linkedStudentId: invite.linkedProfileId,
-      linkedParentId: null,
-    };
-    await updateDoc(doc(db, 'users', user.id), {
-      role: invite.role,
-      status: 'active',
-      academyId: invite.academyId,
-      ...linkedFields,
-      updatedAt: serverTimestamp(),
-    });
     await updateProfileRole(user.id, {
       app_role: invite.role,
       status: 'active',

@@ -6,6 +6,7 @@ import { FormInput } from '../components/ui/FormInput';
 import { PageHeader } from '../components/ui/PageHeader';
 import { getAuditLogs, type AuditLog } from '../lib/academyApi';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 export function SuperAdminAuditLogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -13,21 +14,23 @@ export function SuperAdminAuditLogsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const loadLogs = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        setLogs(await getAuditLogs());
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Could not load audit logs.');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loadLogs = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    setError('');
+    try {
+      setLogs(await getAuditLogs());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load audit logs.');
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     void loadLogs();
   }, []);
+
+  useRefreshOnFocus(() => loadLogs(false));
 
   const filteredLogs = useMemo(() => {
     const term = search.trim().toLowerCase();

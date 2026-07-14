@@ -18,6 +18,7 @@ import {
 } from '../lib/academyApi';
 import { getAcademyStatusClass } from '../utils/academyStatus';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 type AcademyFilter = 'all' | AcademyStatus;
 
@@ -44,6 +45,8 @@ export function SuperAdminAcademiesPage() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useRefreshOnFocus(refresh);
 
   const filteredAcademies = useMemo(() => {
     const term = search.trim().toLowerCase();

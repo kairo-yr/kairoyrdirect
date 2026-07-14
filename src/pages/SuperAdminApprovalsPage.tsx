@@ -5,6 +5,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { approveAcademy, getAcademies, rejectAcademy, type Academy } from '../lib/academyApi';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 export function SuperAdminApprovalsPage() {
   const [academies, setAcademies] = useState<Academy[]>([]);
@@ -28,6 +29,8 @@ export function SuperAdminApprovalsPage() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useRefreshOnFocus(refresh);
 
   const runAction = async (action: () => Promise<void>, success: string) => {
     setMessage('');

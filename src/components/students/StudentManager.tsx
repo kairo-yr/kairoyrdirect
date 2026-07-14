@@ -17,6 +17,7 @@ import {
 } from '../../lib/studentApi';
 import { statusStyles } from '../../utils/badgeStyles';
 import { formatFirestoreDate } from '../../utils/firestoreFormat';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 
 type StudentForm = {
   full_name: string;
@@ -93,6 +94,8 @@ export function StudentManager({
   useEffect(() => {
     void loadStudents();
   }, [academyId]);
+
+  useRefreshOnFocus(loadStudents, Boolean(academyId));
 
   const updateField = (field: keyof StudentForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));

@@ -17,6 +17,7 @@ import {
 } from '../../lib/coachApi';
 import { statusStyles } from '../../utils/badgeStyles';
 import { formatFirestoreDate } from '../../utils/firestoreFormat';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 
 type CoachForm = {
   full_name: string;
@@ -85,6 +86,8 @@ export function CoachManager({
   useEffect(() => {
     void loadCoaches();
   }, [academyId]);
+
+  useRefreshOnFocus(loadCoaches, Boolean(academyId));
 
   const updateField = (field: keyof CoachForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
 import { Ban, RotateCcw, Search } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -9,11 +8,11 @@ import { FormSelect } from '../components/ui/FormSelect';
 import { PageHeader } from '../components/ui/PageHeader';
 import { ROLE_LABELS } from '../constants/roles';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
+import { getApplicationUsers, setApplicationUserStatus } from '../lib/userApi';
 import type { Role, UserProfile, UserStatus } from '../types/auth';
 import { statusStyles } from '../utils/badgeStyles';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
-import { disableUser, reactivateUser } from '../utils/superAdminActions';
 
 type RoleFilter = 'all' | Role;
 type StatusFilter = 'all' | UserStatus;
@@ -29,21 +28,29 @@ export function SuperAdminUsersPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [actionUserId, setActionUserId] = useState<string | null>(null);
 
-  const refresh = async () => {
-    setLoading(true);
-    const snapshot = await getDocs(collection(db, 'users'));
-    setUsers(snapshot.docs.map((docSnap) => ({ uid: docSnap.id, ...docSnap.data() }) as UserProfile));
-    setLoading(false);
+  const refresh = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    setError('');
+    try {
+      setUsers(await getApplicationUsers());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load the canonical application user list.');
+    } finally {
+      if (showLoading) setLoading(false);
+    }
   };
 
   useEffect(() => {
     void refresh();
   }, []);
+
+  useRefreshOnFocus(() => refresh(false));
 
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -57,21 +64,24 @@ export function SuperAdminUsersPage() {
     });
   }, [roleFilter, search, statusFilter, users]);
 
-  const runAction = async (action: () => Promise<void>, success: string) => {
+  const runAction = async (userId: string, status: 'active' | 'disabled', success: string) => {
     setMessage('');
     setError('');
+    setActionUserId(userId);
     try {
-      await action();
+      await setApplicationUserStatus(userId, status);
       setMessage(success);
-      await refresh();
+      await refresh(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Action failed.');
+    } finally {
+      setActionUserId(null);
     }
   };
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Users" description="Search and manage user profiles across Kairoyr Direct." />
+      <PageHeader title="Users" description="Canonical application users backed by Supabase Auth and profiles." />
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
         <div className="flex items-center gap-2 text-navy"><Search size={20} /><h2 className="text-xl font-black">Search and Filter</h2></div>
         <div className="mt-4 grid gap-4 md:grid-cols-[1fr_180px_180px]">
@@ -93,7 +103,12 @@ export function SuperAdminUsersPage() {
         </div>
       </section>
       {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</div> : null}
-      {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</div> : null}
+      {error ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">
+          <span>{error}</span>
+          <button className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs" onClick={() => void refresh()} type="button">Retry</button>
+        </div>
+      ) : null}
       {loading ? (
         <EmptyState title="Loading users" description="Checking user profiles." />
       ) : filteredUsers.length === 0 ? (
@@ -116,12 +131,12 @@ export function SuperAdminUsersPage() {
                   {protectedLabel ? (
                     <span className="text-sm font-black text-slate-500">{protectedLabel}</span>
                   ) : user.status === 'disabled' ? (
-                    <button className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white" onClick={() => runAction(() => reactivateUser(user.uid, userProfile!), `${user.email} reactivated.`)} type="button">
-                      <RotateCcw size={14} /> Reactivate
+                    <button className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-60" disabled={actionUserId !== null} onClick={() => runAction(user.uid, 'active', `${user.email} reactivated.`)} type="button">
+                      <RotateCcw size={14} /> {actionUserId === user.uid ? 'Saving…' : 'Reactivate'}
                     </button>
                   ) : (
-                    <button className="inline-flex items-center gap-1 rounded-xl border border-rose-100 px-3 py-2 text-xs font-black text-rose-600" onClick={() => runAction(() => disableUser(user.uid, userProfile!), `${user.email} disabled.`)} type="button">
-                      <Ban size={14} /> Disable
+                    <button className="inline-flex items-center gap-1 rounded-xl border border-rose-100 px-3 py-2 text-xs font-black text-rose-600 disabled:opacity-60" disabled={actionUserId !== null} onClick={() => runAction(user.uid, 'disabled', `${user.email} disabled.`)} type="button">
+                      <Ban size={14} /> {actionUserId === user.uid ? 'Saving…' : 'Disable'}
                     </button>
                   )}
                 </td>

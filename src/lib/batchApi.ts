@@ -146,17 +146,37 @@ export async function updateBatch(id: string, input: Partial<Omit<BatchInput, 'a
     ...(input.max_students !== undefined ? { max_students: input.max_students } : {}),
     ...(input.notes !== undefined ? { notes: cleanText(input.notes) } : {}),
   };
-  const { data, error } = await supabase.from('batches').update(update).eq('id', id).select('*').single();
+  const { data, error } = await supabase
+    .from('batches')
+    .update(update)
+    .eq('id', id)
+    .select('*, primary_coach:coaches(id, full_name, status)')
+    .single();
   if (error) throw error;
-  await insertAuditLog({
-    actor_user_id: actorUserId,
-    academy_id: data.academy_id,
-    action: 'batch.updated',
-    entity_type: 'batch',
-    entity_id: id,
-    old_values: previous,
-    new_values: data,
-  });
+
+  try {
+    await insertAuditLog({
+      actor_user_id: actorUserId,
+      academy_id: data.academy_id,
+      action: 'batch.updated',
+      entity_type: 'batch',
+      entity_id: id,
+      old_values: previous,
+      new_values: data,
+    });
+  } catch (auditError) {
+    if (import.meta.env.DEV) {
+      const error = auditError as Partial<{ code: string; message: string; details: string; hint: string }>;
+      console.error('Batch update succeeded, but its audit log could not be written.', {
+        batchId: id,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+    }
+  }
+
   return data as Batch;
 }
 
