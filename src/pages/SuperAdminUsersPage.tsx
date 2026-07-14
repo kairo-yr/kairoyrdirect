@@ -40,6 +40,7 @@ export function SuperAdminUsersPage() {
     try {
       setUsers(await getApplicationUsers());
     } catch (caught) {
+      setUsers([]);
       setError(caught instanceof Error ? caught.message : 'Could not load the canonical application user list.');
     } finally {
       if (showLoading) setLoading(false);
@@ -103,14 +104,13 @@ export function SuperAdminUsersPage() {
         </div>
       </section>
       {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</div> : null}
-      {error ? (
+      {loading ? (
+        <EmptyState title="Loading users" description="Checking user profiles." />
+      ) : error ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">
           <span>{error}</span>
           <button className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs" onClick={() => void refresh()} type="button">Retry</button>
         </div>
-      ) : null}
-      {loading ? (
-        <EmptyState title="Loading users" description="Checking user profiles." />
       ) : filteredUsers.length === 0 ? (
         <EmptyState title="No users found" description="Try a different search or filter." />
       ) : (

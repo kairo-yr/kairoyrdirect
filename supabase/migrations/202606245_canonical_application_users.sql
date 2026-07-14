@@ -71,7 +71,7 @@ returns table (
   status text,
   academy_id uuid,
   coach_id uuid,
-  linked_student_id uuid,
+  student_id uuid,
   created_at timestamptz,
   updated_at timestamptz,
   last_sign_in_at timestamptz

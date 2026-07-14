@@ -12,7 +12,7 @@ type ApplicationUserRow = {
   status: UserStatus;
   academy_id: string | null;
   coach_id: string | null;
-  linked_student_id: string | null;
+  student_id: string | null;
   created_at: string;
   updated_at: string;
   last_sign_in_at: string | null;
@@ -41,7 +41,7 @@ function mapApplicationUser(row: ApplicationUserRow): UserProfile {
     appRole: role,
     status: row.status,
     academyId: row.academy_id,
-    linkedStudentId: row.linked_student_id,
+    linkedStudentId: row.student_id,
     linkedParentId: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -50,8 +50,27 @@ function mapApplicationUser(row: ApplicationUserRow): UserProfile {
 }
 
 export async function getApplicationUsers() {
-  const { data, error } = await supabase.rpc('list_application_users');
-  if (error) throw error;
+  const { data, error, status } = await supabase.rpc('list_application_users');
+  if (error) {
+    if (import.meta.env.DEV) {
+      console.error('Could not load canonical application users', {
+        errorMessage: error.message,
+        errorCode: error.code,
+        details: error.details,
+        hint: error.hint,
+        httpStatus: status,
+      });
+    }
+
+    const requestError = new Error(error.message || 'Could not load canonical application users.');
+    Object.assign(requestError, {
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      status,
+    });
+    throw requestError;
+  }
   return ((data ?? []) as ApplicationUserRow[]).map(mapApplicationUser);
 }
 
