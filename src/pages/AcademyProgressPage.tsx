@@ -9,7 +9,9 @@ import { FormSelect } from '../components/ui/FormSelect';
 import { Modal } from '../components/ui/Modal';
 import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrentCoach } from '../hooks/useCurrentCoach';
 import { db } from '../lib/firebase';
+import { getCoachWorkspace } from '../lib/coachWorkspaceApi';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 import { createAuditLog } from '../utils/superAdminActions';
 
@@ -134,11 +136,12 @@ function getAttendancePercentage(studentId: string, records: AttendanceRecord[])
 
 function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
   const { userProfile } = useAuth();
-  const academyId = userProfile?.academyId;
-  const linkedCoachId = userProfile?.linkedCoachId;
+  const isCoachMode = mode === 'coach';
+  const { coach: currentCoach, error: coachResolutionError, loading: coachResolutionLoading } = useCurrentCoach(isCoachMode);
+  const academyId = isCoachMode ? currentCoach?.academy_id ?? userProfile?.academyId : userProfile?.academyId;
+  const coachId = currentCoach?.id ?? null;
   const linkedStudentId = userProfile?.linkedStudentId;
   const isAcademyMode = mode === 'academy';
-  const isCoachMode = mode === 'coach';
   const isStudentMode = mode === 'student';
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [batches, setBatches] = useState<BatchRecord[]>([]);
@@ -205,7 +208,7 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
 
   useEffect(() => {
     const loadPage = async () => {
-      if (!academyId || (isCoachMode && !linkedCoachId) || (isStudentMode && !linkedStudentId)) {
+      if (!academyId || (isCoachMode && !coachId) || (isStudentMode && !linkedStudentId)) {
         setLoading(false);
         return;
       }
@@ -235,31 +238,26 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
           return;
         }
 
-        const [batchSnapshot, attendanceSnapshot] = await Promise.all([
-          isCoachMode && linkedCoachId
-            ? getDocs(query(collection(db, 'academies', academyId, 'batches'), where('coachId', '==', linkedCoachId)))
-            : getDocs(collection(db, 'academies', academyId, 'batches')),
-          isCoachMode && linkedCoachId
-            ? getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', linkedCoachId)))
-            : getDocs(collection(db, 'academies', academyId, 'attendance')),
-        ]);
-        const activeBatches = batchSnapshot.docs
-          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
-          .filter((batch) => batch.status === 'active')
-          .filter((batch) => !isCoachMode || batch.coachId === linkedCoachId);
-        const visibleStudentIds = new Set(activeBatches.flatMap((batch) => batch.studentIds));
-        const studentDocs = isCoachMode
-          ? await Promise.all(Array.from(visibleStudentIds).map((studentId) => getDoc(doc(db, 'academies', academyId, 'students', studentId))))
-          : (await getDocs(collection(db, 'academies', academyId, 'students'))).docs;
-        const loadedStudents = studentDocs
-          .filter((docSnap) => docSnap.exists())
-          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
-          .filter((student) => student.status !== 'disabled')
-          .filter((student) => {
-            if (isStudentMode) return student.id === linkedStudentId;
-            if (isCoachMode) return visibleStudentIds.has(student.id);
-            return true;
-          });
+        const attendanceSnapshot = isCoachMode && coachId
+          ? await getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', coachId)))
+          : await getDocs(collection(db, 'academies', academyId, 'attendance'));
+        let activeBatches: BatchRecord[];
+        let loadedStudents: StudentRecord[];
+        if (isCoachMode && coachId) {
+          const workspace = await getCoachWorkspace(coachId, academyId);
+          activeBatches = workspace.batches;
+          loadedStudents = workspace.students;
+        } else {
+          const batchSnapshot = await getDocs(collection(db, 'academies', academyId, 'batches'));
+          activeBatches = batchSnapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
+            .filter((batch) => batch.status === 'active');
+          const studentDocs = await getDocs(collection(db, 'academies', academyId, 'students'));
+          loadedStudents = studentDocs.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
+            .filter((student) => student.status !== 'disabled')
+            .filter((student) => !isStudentMode || student.id === linkedStudentId);
+        }
         setBatches(activeBatches);
         setStudents(loadedStudents);
         const activeBatchIds = new Set(activeBatches.map((batch) => batch.id));
@@ -281,7 +279,7 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
     };
 
     void loadPage();
-  }, [academyId, isCoachMode, isStudentMode, linkedCoachId, linkedStudentId]);
+  }, [academyId, coachId, isCoachMode, isStudentMode, linkedStudentId]);
 
   const coachOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -354,7 +352,7 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
         studentName: selectedStudent.name,
         batchId: selectedBatch?.id ?? null,
         batchName: selectedBatch?.name ?? null,
-        coachId: selectedBatch?.coachId ?? (isCoachMode ? linkedCoachId : null),
+        coachId: selectedBatch?.coachId ?? (isCoachMode ? coachId : null),
         coachName: selectedBatch?.coachName ?? null,
         date: selectedDate,
         ratings,
@@ -445,11 +443,19 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
     }
   };
 
+  if (isCoachMode && coachResolutionLoading) {
+    return <EmptyState title="Loading coach profile" description="Verifying your coach membership and academy assignments." />;
+  }
+
+  if (isCoachMode && coachResolutionError) {
+    return <EmptyState title="Could not load coach profile" description={coachResolutionError} />;
+  }
+
   if (!academyId) {
     return <EmptyState title="Academy profile not linked" description="Your account is not connected to an academy yet." />;
   }
 
-  if (isCoachMode && !linkedCoachId) {
+  if (isCoachMode && !coachId) {
     return <EmptyState title="No coach profile linked yet" description="Log in with the Google email your academy pre-authorized for coach access." />;
   }
 

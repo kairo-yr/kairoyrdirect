@@ -71,7 +71,7 @@
 ## 6. Security Tests
 - Confirm wrong-role protected routes redirect before rendering protected content.
 - Confirm disabled users redirect to unauthorized.
-- Confirm users cannot update their own role, status, academyId, linkedCoachId, or linkedStudentId.
+- Confirm users cannot update their own role, status, academyId, or linkedStudentId; coach identity must resolve from the authenticated Supabase coach row.
 - Confirm academy admin queries stay under their own academy.
 - Confirm coach views show assigned batch/student data only.
 - Confirm student views show linked student data only.

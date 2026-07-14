@@ -196,23 +196,34 @@ export async function getCoachById(id: string) {
 }
 
 export async function getCurrentUserCoach(academyId?: string | null) {
-  const actorUserId = await getActorUserId();
-  if (!actorUserId) return null;
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!user) throw new Error('Authentication required to resolve a coach profile.');
 
-  let query = supabase
-    .from('coaches')
-    .select('*')
-    .eq('user_id', actorUserId)
-    .order('created_at', { ascending: false })
-    .limit(1);
+  const { data, error, status } = await supabase.rpc('resolve_my_coach_profile', {
+    target_academy_id: academyId ?? null,
+  });
+  const rows = (data ?? []) as Coach[];
 
-  if (academyId) {
-    query = query.eq('academy_id', academyId);
+  if (import.meta.env.DEV) {
+    console.info('Current coach resolution', {
+      authenticatedUserId: user.id,
+      authenticatedEmail: user.email?.trim().toLowerCase() ?? null,
+      academyId: academyId ?? null,
+      matchingCoachIds: rows.map((coach) => coach.id),
+      matchingRowCount: rows.length,
+      membershipIds: rows.map((coach) => coach.membership_id),
+      rpcResponse: data,
+      httpStatus: status,
+      errorCode: error?.code,
+      errorMessage: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+    });
   }
 
-  const { data, error } = await query.maybeSingle();
-  if (error) throw error;
-  return data as Coach | null;
+  if (error) throw Object.assign(error, { status });
+  return rows[0] ?? null;
 }
 
 export async function createCoach(input: CoachInput) {

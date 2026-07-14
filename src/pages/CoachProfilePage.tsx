@@ -3,39 +3,26 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { getCoachById, getCurrentUserCoach, updateCoach, type Coach } from '../lib/coachApi';
+import { useCurrentCoach } from '../hooks/useCurrentCoach';
+import { updateCoach, type Coach } from '../lib/coachApi';
 
 export function CoachProfilePage() {
   const { refreshUserProfile, userProfile } = useAuth();
-  const academyId = userProfile?.academyId;
-  const linkedCoachId = userProfile?.linkedCoachId;
+  const { coach: resolvedCoach, error: resolutionError, loading: resolutionLoading } = useCurrentCoach();
+  const academyId = resolvedCoach?.academy_id ?? userProfile?.academyId;
   const [coach, setCoach] = useState<Coach | null>(null);
   const [form, setForm] = useState({ name: '', phone: '' });
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const loadProfile = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const loadedCoach = linkedCoachId ? await getCoachById(linkedCoachId) : await getCurrentUserCoach(academyId);
-        setCoach(loadedCoach);
-        setForm({
-          name: loadedCoach?.full_name || userProfile?.name || '',
-          phone: loadedCoach?.phone || '',
-        });
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Could not load coach profile.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void loadProfile();
-  }, [academyId, linkedCoachId, userProfile?.name]);
+    setCoach(resolvedCoach);
+    setForm({
+      name: resolvedCoach?.full_name || userProfile?.name || '',
+      phone: resolvedCoach?.phone || '',
+    });
+  }, [resolvedCoach, userProfile?.name]);
 
   const updateField = (field: 'name' | 'phone', value: string) => {
     setMessage('');
@@ -72,8 +59,8 @@ export function CoachProfilePage() {
     <div className="space-y-6">
       <PageHeader title="Coach Profile" description="Edit safe personal details for your coach account." />
       {message ? <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">{message}</div> : null}
-      {error ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error}</div> : null}
-      {loading ? (
+      {error || resolutionError ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">{error || resolutionError}</div> : null}
+      {resolutionLoading ? (
         <EmptyState title="Loading profile" description="Checking your Supabase coach profile." />
       ) : !coach ? (
         <EmptyState title="Your coach profile is not linked yet" description="Contact your academy." />

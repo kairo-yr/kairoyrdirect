@@ -11,7 +11,7 @@ type ApplicationUserRow = {
   app_role: Role;
   status: UserStatus;
   academy_id: string | null;
-  linked_coach_id: string | null;
+  coach_id: string | null;
   linked_student_id: string | null;
   created_at: string;
   updated_at: string;
@@ -41,7 +41,6 @@ function mapApplicationUser(row: ApplicationUserRow): UserProfile {
     appRole: role,
     status: row.status,
     academyId: row.academy_id,
-    linkedCoachId: row.linked_coach_id,
     linkedStudentId: row.linked_student_id,
     linkedParentId: null,
     createdAt: row.created_at,

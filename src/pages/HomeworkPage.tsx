@@ -13,6 +13,7 @@ import { SearchInput } from '../components/ui/SearchInput';
 import { StatCard } from '../components/ui/StatCard';
 import { PLAY_APP_NAME } from '../config/brand';
 import { useAuth } from '../contexts/AuthContext';
+import { useCurrentCoach } from '../hooks/useCurrentCoach';
 import { db } from '../lib/firebase';
 import { formatFirestoreDate } from '../utils/firestoreFormat';
 import { createAuditLog } from '../utils/superAdminActions';
@@ -150,11 +151,12 @@ function Detail({ label, value }: { label: string; value?: string }) {
 
 export function HomeworkPage({ mode }: { mode: HomeworkMode }) {
   const { userProfile } = useAuth();
-  const academyId = userProfile?.academyId;
-  const linkedCoachId = userProfile?.linkedCoachId;
+  const isCoachMode = mode === 'coach';
+  const { coach: currentCoach, error: coachResolutionError, loading: coachResolutionLoading } = useCurrentCoach(isCoachMode);
+  const academyId = isCoachMode ? currentCoach?.academy_id ?? userProfile?.academyId : userProfile?.academyId;
+  const coachId = currentCoach?.id ?? null;
   const linkedStudentId = userProfile?.linkedStudentId;
   const canCreate = mode !== 'student';
-  const isCoachMode = mode === 'coach';
   const [batches, setBatches] = useState<BatchRecord[]>([]);
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [homework, setHomework] = useState<HomeworkRecord[]>([]);
@@ -176,7 +178,7 @@ export function HomeworkPage({ mode }: { mode: HomeworkMode }) {
   const visibleStudentIds = useMemo(() => new Set(activeStudents.map((student) => student.id)), [activeStudents]);
 
   const loadPage = async () => {
-    if (!academyId || (mode === 'coach' && !linkedCoachId) || (mode === 'student' && !linkedStudentId)) {
+    if (!academyId || (mode === 'coach' && !coachId) || (mode === 'student' && !linkedStudentId)) {
       setLoading(false);
       return;
     }
@@ -206,8 +208,8 @@ export function HomeworkPage({ mode }: { mode: HomeworkMode }) {
       }
 
       const [batchSnapshot, studentSnapshot] = await Promise.all([
-        isCoachMode && linkedCoachId
-          ? getDocs(query(collection(db, 'academies', academyId, 'batches'), where('coachId', '==', linkedCoachId)))
+        isCoachMode && coachId
+          ? getDocs(query(collection(db, 'academies', academyId, 'batches'), where('coachId', '==', coachId)))
           : getDocs(collection(db, 'academies', academyId, 'batches')),
         getDocs(collection(db, 'academies', academyId, 'students')),
       ]);
@@ -244,7 +246,7 @@ export function HomeworkPage({ mode }: { mode: HomeworkMode }) {
 
   useEffect(() => {
     void loadPage();
-  }, [academyId, linkedCoachId, linkedStudentId, mode]);
+  }, [academyId, coachId, linkedStudentId, mode]);
 
   const filteredHomework = useMemo(() => homework.filter((item) => {
     const searchText = `${item.title} ${item.description} ${item.studentNames.join(' ')} ${item.batchName ?? ''}`.toLowerCase();
@@ -405,6 +407,14 @@ export function HomeworkPage({ mode }: { mode: HomeworkMode }) {
       setError(caught instanceof Error ? caught.message : 'Could not archive homework.');
     }
   };
+
+  if (isCoachMode && coachResolutionLoading) {
+    return <EmptyState title="Loading coach profile" description="Verifying your coach membership and academy assignments." />;
+  }
+
+  if (isCoachMode && coachResolutionError) {
+    return <EmptyState title="Could not load coach profile" description={coachResolutionError} />;
+  }
 
   if (!academyId) {
     return <EmptyState title="Academy profile not linked" description="Your profile is not linked to an academy yet." />;

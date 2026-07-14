@@ -35,7 +35,6 @@ type ProfileRow = {
   status: string | null;
   created_at: string | null;
   updated_at: string | null;
-  linked_coach_id?: string | null;
   linked_student_id?: string | null;
   linked_parent_id?: string | null;
 };
@@ -126,7 +125,6 @@ async function normalizeProfile(row: ProfileRow, user: AuthUser): Promise<UserPr
     appRole,
     status: normalizeStatus(row.status),
     academyId,
-    linkedCoachId: row.linked_coach_id ?? null,
     linkedStudentId: row.linked_student_id ?? null,
     linkedParentId: row.linked_parent_id ?? null,
     createdAt: row.created_at,
@@ -187,7 +185,9 @@ async function getOrCreateUserProfile(user: AuthUser) {
 
 async function claimVerifiedCoachAccount(user: AuthUser) {
   const verifiedEmail = user.email?.trim().toLowerCase() ?? '';
-  const { data, error, status } = await supabase.rpc('claim_my_coach_account');
+  const { data, error, status } = await supabase.rpc('resolve_my_coach_profile', {
+    target_academy_id: null,
+  });
   const claimedCoaches = (data ?? []) as ClaimedCoachRow[];
 
   if (import.meta.env.DEV) {
@@ -261,7 +261,6 @@ async function updateProfileRole(
   input: {
     app_role: Role;
     status?: UserStatus;
-    linked_coach_id?: string | null;
     linked_student_id?: string | null;
     linked_parent_id?: string | null;
   },
@@ -271,7 +270,6 @@ async function updateProfileRole(
     .update({
       app_role: input.app_role,
       status: input.status ?? 'active',
-      linked_coach_id: input.linked_coach_id ?? null,
       linked_student_id: input.linked_student_id ?? null,
       linked_parent_id: input.linked_parent_id ?? null,
     })
@@ -484,7 +482,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await updateProfileRole(user.id, {
       app_role: invite.role,
       status: 'active',
-      linked_coach_id: null,
       linked_student_id: invite.linkedProfileId,
       linked_parent_id: null,
     });

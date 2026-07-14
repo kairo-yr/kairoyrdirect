@@ -124,7 +124,7 @@ export function SuperAdminUsersPage() {
                 <td className="px-5 py-4 text-slate-600">{ROLE_LABELS[user.role]}</td>
                 <td className="px-5 py-4"><Badge className={user.status === 'active' ? statusStyles.active : user.status === 'pending' ? statusStyles.pending : statusStyles.inactive}>{user.status}</Badge></td>
                 <td className="px-5 py-4 text-slate-600">{user.academyId || 'Not assigned'}</td>
-                <td className="px-5 py-4 text-xs text-slate-600">C:{user.linkedCoachId || '-'} S:{user.linkedStudentId || '-'} P:{user.linkedParentId || '-'}</td>
+                <td className="px-5 py-4 text-xs text-slate-600">S:{user.linkedStudentId || '-'} P:{user.linkedParentId || '-'}</td>
                 <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(user.createdAt)}</td>
                 <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(user.lastLoginAt)}</td>
                 <td className="px-5 py-4">

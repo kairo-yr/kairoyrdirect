@@ -70,7 +70,7 @@ returns table (
   app_role text,
   status text,
   academy_id uuid,
-  linked_coach_id uuid,
+  coach_id uuid,
   linked_student_id uuid,
   created_at timestamptz,
   updated_at timestamptz,

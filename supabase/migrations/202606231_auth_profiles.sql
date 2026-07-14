@@ -5,7 +5,6 @@ create table if not exists public.profiles (
   avatar_url text,
   phone text,
   academy_id text,
-  linked_coach_id text,
   linked_student_id text,
   linked_parent_id text,
   platform_role text not null default 'user',

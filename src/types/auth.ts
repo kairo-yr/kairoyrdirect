@@ -28,7 +28,6 @@ export interface UserProfile {
   appRole: string;
   status: UserStatus;
   academyId: string | null;
-  linkedCoachId: string | null;
   linkedStudentId: string | null;
   linkedParentId: string | null;
   createdAt: unknown;
