@@ -41,7 +41,7 @@ const links: Array<{ label: string; to: string; icon: typeof LayoutDashboard; ro
   { label: 'Progress', to: '/student/progress', icon: GraduationCap, roles: ['student'] },
   { label: 'Fees', to: '/student/fees', icon: CreditCard, roles: ['student'] },
   { label: 'Profile', to: '/student/profile', icon: UserRound, roles: ['student'] },
-  { label: 'Homework', to: '/student/homework', icon: ClipboardList, roles: ['student'] },
+  { label: 'My Homework', to: '/student/homework', icon: ClipboardList, roles: ['student'] },
   { label: 'Platform Settings', to: '/super-admin/settings', icon: Settings, roles: ['super_admin'] },
   { label: 'Students', to: '/academy/students', icon: GraduationCap, roles: ['academy_admin'] },
   { label: 'Coaches', to: '/academy/coaches', icon: UsersRound, roles: ['academy_admin'] },

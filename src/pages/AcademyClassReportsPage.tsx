@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { Check, Copy, Edit, Eye, FileText, Plus, RotateCcw, Save } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { BookOpen, Check, Copy, Edit, Eye, FileText, Plus, RotateCcw, Save } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
@@ -132,6 +132,7 @@ function notesFromReport(report: ClassReportRecord): ReportForm {
 }
 
 function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
+  const navigate = useNavigate();
   const { userProfile } = useAuth();
   const isCoachMode = mode === 'coach';
   const { coach: currentCoach, error: coachResolutionError, loading: coachResolutionLoading } = useCurrentCoach(isCoachMode);
@@ -683,6 +684,22 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
               <div><span className="font-black text-navy">Created:</span> {formatFirestoreDate(viewReport.createdAt)}</div>
               <div><span className="font-black text-navy">Updated:</span> {formatFirestoreDate(viewReport.updatedAt)}</div>
             </div>
+            <button
+              className="inline-flex items-center gap-2 rounded-xl bg-directBlue px-4 py-2.5 font-black text-white"
+              onClick={() => {
+                const params = new URLSearchParams({
+                  batchId: viewReport.batchId,
+                  classReportId: viewReport.id,
+                  assignedDate: viewReport.date,
+                  title: `Homework — ${viewReport.topicCovered || viewReport.title}`,
+                  instructions: viewReport.topicCovered || '',
+                });
+                navigate(`/${mode}/homework?${params.toString()}`);
+              }}
+              type="button"
+            >
+              <BookOpen size={17} /> Create Homework
+            </button>
             {[
               ['Title', viewReport.title],
               ['Topic covered', viewReport.topicCovered],

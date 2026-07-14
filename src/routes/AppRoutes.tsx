@@ -80,6 +80,7 @@ export function AppRoutes() {
         <Route path="/student/fees" element={<ProtectedRoute allowedRoles={['student']}><StudentFeesPage /></ProtectedRoute>} />
         <Route path="/student/profile" element={<ProtectedRoute allowedRoles={['student']}><StudentProfileSettingsPage /></ProtectedRoute>} />
         <Route path="/student/homework" element={<ProtectedRoute allowedRoles={['student']}><HomeworkPage mode="student" /></ProtectedRoute>} />
+        <Route path="/homework/:publicCode" element={<ProtectedRoute allowedRoles={['student']}><HomeworkPage mode="student" /></ProtectedRoute>} />
         <Route path="/onboarding" element={<ProtectedRoute allowedRoles={['unassigned', 'user']}><Onboarding /></ProtectedRoute>} />
         <Route path="/pending-approval" element={<ProtectedRoute allowedRoles={['unassigned', 'user']} allowedStatuses={['pending']}><PendingApproval /></ProtectedRoute>} />
         <Route path="/dashboard" element={<DashboardRedirect />} />
