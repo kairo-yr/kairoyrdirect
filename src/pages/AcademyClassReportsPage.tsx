@@ -35,6 +35,7 @@ type StudentRecord = {
   id: string;
   name: string;
   status?: string;
+  participationLabel?: string;
 };
 
 type AttendanceRecord = {
@@ -49,6 +50,7 @@ type StudentReportNote = {
   studentName: string;
   note: string;
   performanceTag: PerformanceTag;
+  participationLabel?: string;
 };
 
 type ClassReportRecord = {
@@ -100,6 +102,24 @@ const emptyForm: ReportForm = {
   studentNotes: [],
 };
 
+function participationLabel(source: string) {
+  return ({ makeup: 'Makeup', compensation: 'Makeup', extra_class: 'Extra', temporary: 'Temporary', temporary_transfer: 'Temporary', rescheduled: 'Temporary', trial: 'Trial', other: 'Added student', manual_other: 'Added student' } as Record<string, string>)[source];
+}
+
+function reconcileStudentNotes(savedNotes: StudentReportNote[], participants: StudentReportNote[]) {
+  const savedByStudent = new Map(savedNotes.map((note) => [note.studentId, note]));
+  const participantIds = new Set(participants.map((note) => note.studentId));
+  const current = participants.map((participant) => ({
+    ...participant,
+    ...savedByStudent.get(participant.studentId),
+    participationLabel: participant.participationLabel,
+  }));
+  const preservedRemoved = savedNotes
+    .filter((note) => !participantIds.has(note.studentId) && (note.note.trim() || note.performanceTag !== 'not_reviewed'))
+    .map((note) => ({ ...note, participationLabel: 'Removed from session' }));
+  return [...current, ...preservedRemoved];
+}
+
 function getTodayDate() {
   const date = new Date();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -117,6 +137,7 @@ function buildStudentNotes(batch: BatchRecord | undefined, studentsById: Map<str
       studentName: student.name || 'Unnamed student',
       note: '',
       performanceTag: 'not_reviewed',
+      participationLabel: student.participationLabel,
     }));
 }
 
@@ -215,7 +236,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
           const sourceBatchId = searchParams.get('batchId') || requestedSession.session_source_batches?.[0]?.batch_id || '';
           effectiveBatches = loadedBatches.map((batch) => batch.id === sourceBatchId ? { ...batch, studentIds: Array.from(new Set([...batch.studentIds, ...rosterIds])) } : batch);
           requestedSession.session_participants?.forEach((participant) => {
-            if (participant.student) loadedStudents.set(participant.student_id, { id: participant.student_id, name: participant.student.full_name, status: 'active' });
+            if (participant.student) loadedStudents.set(participant.student_id, { id: participant.student_id, name: participant.student.full_name, status: 'active', participationLabel: participationLabel(participant.source_type) });
           });
           effectiveAttendance = [{ id: `session:${requestedSession.id}`, academyId, batchId: sourceBatchId, batchName: requestedSession.session_source_batches?.[0]?.batch?.name ?? 'Mixed class', coachId: requestedSession.coach_id, coachName: requestedSession.coach?.full_name ?? null, date: requestedSession.session_date, status: requestedSession.status === 'completed' ? 'submitted' : 'draft', students: (requestedSession.session_participants ?? []).map((participant) => ({ studentId: participant.student_id, studentName: participant.student?.full_name ?? 'Student', status: ['present','late'].includes(participant.attendance_status) ? 'present' : 'absent', note: participant.attendance_note ?? '' })) } as AttendanceRecord, ...effectiveAttendance];
           setSelectedDate(requestedSession.session_date);
@@ -249,7 +270,11 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
       return;
     }
     if (existingReport) {
-      setForm(notesFromReport(existingReport));
+      const saved = notesFromReport(existingReport);
+      if (existingReport.status === 'draft' && requestedSessionId) {
+        saved.studentNotes = reconcileStudentNotes(saved.studentNotes, buildStudentNotes(selectedBatch, studentsById));
+      }
+      setForm(saved);
       setMessage('Class report for this batch and date already exists. Editing existing report.');
       return;
     }
@@ -401,9 +426,25 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
     }
   };
 
-  const openEdit = (report: ClassReportRecord) => {
+  const openEdit = async (report: ClassReportRecord) => {
     setEditReport(report);
-    setEditForm(notesFromReport(report));
+    const saved = notesFromReport(report);
+    if (report.status === 'draft' && report.classSessionId) {
+      try {
+        const linkedSession = await getClassSession(report.classSessionId);
+        const participants = (linkedSession.session_participants ?? []).map((participant): StudentReportNote => ({
+          studentId: participant.student_id,
+          studentName: participant.student?.full_name ?? 'Student',
+          note: '',
+          performanceTag: 'not_reviewed',
+          participationLabel: participationLabel(participant.source_type),
+        }));
+        saved.studentNotes = reconcileStudentNotes(saved.studentNotes, participants);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'Could not refresh the attendance participant list.');
+      }
+    }
+    setEditForm(saved);
     setEditStatus(report.status);
   };
 
@@ -598,7 +639,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
             ) : (
               form.studentNotes.map((note) => (
                 <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_210px_1.2fr]" key={note.studentId}>
-                  <div className="font-black text-navy">{note.studentName}</div>
+                  <div className="flex flex-wrap items-center gap-2 font-black text-navy">{note.studentName}{note.participationLabel ? <Badge className="bg-amber-50 text-amber-700">{note.participationLabel}</Badge> : null}</div>
                   <FormSelect
                     label="Performance"
                     onChange={(event) => updateStudentNote(note.studentId, 'performanceTag', event.target.value)}
@@ -669,7 +710,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
                       <p className="mt-2 text-sm font-semibold text-slate-600">{report.topicCovered}</p>
                       {report.classSummary ? <p className="mt-2 line-clamp-2 text-sm text-slate-500">{report.classSummary}</p> : null}
                       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-bold text-slate-500"><span>{report.batchName}</span>{!isCoachMode ? <span>{report.coachName ?? 'Coach not assigned'}</span> : null}<span>{report.studentsPresentIds?.length ?? 0} present</span></div>
-                      <div className="mt-4 flex flex-wrap gap-2"><button className="min-h-9 rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button><button className="min-h-9 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => openEdit(report)} type="button">Edit</button><button aria-label="Copy WhatsApp message" className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700" onClick={() => void copyWhatsAppMessage(report)} title="Copy WhatsApp message" type="button">{copiedReportId === report.id ? <Check size={14} /> : <Copy size={14} />}{copiedReportId === report.id ? 'Copied' : 'Copy'}</button></div>
+                      <div className="mt-4 flex flex-wrap gap-2"><button className="min-h-9 rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => setViewReport(report)} type="button">View</button><button className="min-h-9 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-navy" onClick={() => void openEdit(report)} type="button">Edit</button><button aria-label="Copy WhatsApp message" className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700" onClick={() => void copyWhatsAppMessage(report)} title="Copy WhatsApp message" type="button">{copiedReportId === report.id ? <Check size={14} /> : <Copy size={14} />}{copiedReportId === report.id ? 'Copied' : 'Copy'}</button></div>
                     </article>
                   ))}
                 </div>
@@ -731,7 +772,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
               <div className="mt-2 space-y-2">
                 {viewReport.studentNotes.map((note) => (
                   <div className="rounded-2xl border border-slate-200 p-3" key={note.studentId}>
-                    <div className="font-black text-navy">{note.studentName} · {note.performanceTag}</div>
+                    <div className="flex flex-wrap items-center gap-2 font-black text-navy">{note.studentName} · {note.performanceTag}{note.participationLabel ? <Badge className="bg-amber-50 text-amber-700">{note.participationLabel}</Badge> : null}</div>
                     <p>{note.note || 'No note added.'}</p>
                   </div>
                 ))}
@@ -781,7 +822,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
           ))}
           {editForm.studentNotes.map((note) => (
             <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_210px_1.2fr]" key={note.studentId}>
-              <div className="font-black text-navy">{note.studentName}</div>
+              <div className="flex flex-wrap items-center gap-2 font-black text-navy">{note.studentName}{note.participationLabel ? <Badge className="bg-amber-50 text-amber-700">{note.participationLabel}</Badge> : null}</div>
               <FormSelect
                 label="Performance"
                 onChange={(event) => updateEditStudentNote(note.studentId, 'performanceTag', event.target.value)}

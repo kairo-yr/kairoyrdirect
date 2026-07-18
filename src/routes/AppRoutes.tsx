@@ -5,7 +5,6 @@ import { ClassSessionAttendancePage } from '../pages/ClassSessionAttendancePage'
 import { AcademyClassReportsPage, CoachClassReportsPage } from '../pages/AcademyClassReportsPage';
 import { AcademyDashboard } from '../pages/AcademyDashboard';
 import { AcademyBatchesPage } from '../pages/AcademyBatchesPage';
-import { AcademyClassSlotsPage } from '../pages/AcademyClassSlotsPage';
 import { AcademyCoachesPage } from '../pages/AcademyCoachesPage';
 import { AcademyFeesPage, StudentFeesPage } from '../pages/AcademyFeesPage';
 import { AcademyInvitesPage } from '../pages/AcademyInvitesPage';
@@ -46,7 +45,6 @@ export function AppRoutes() {
       <Route path="/join" element={<JoinInviteLookup />} />
       <Route path="/join/:role/:inviteToken" element={<JoinInvitePage />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
-      {import.meta.env.DEV ? <Route path="/_qa/session-attendance" element={<ClassSessionAttendancePage mode="academy" preview />} /> : null}
       <Route element={<AppLayout />}>
         <Route path="/super-admin" element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminDashboard /></ProtectedRoute>} />
         <Route path="/super-admin/academies" element={<ProtectedRoute allowedRoles={['super_admin']}><SuperAdminAcademiesPage /></ProtectedRoute>} />
@@ -60,7 +58,6 @@ export function AppRoutes() {
         <Route path="/academy/students" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyStudentsPage /></ProtectedRoute>} />
         <Route path="/academy/coaches" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyCoachesPage /></ProtectedRoute>} />
         <Route path="/academy/batches" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyBatchesPage /></ProtectedRoute>} />
-        <Route path="/academy/class-schedules" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyClassSlotsPage /></ProtectedRoute>} />
         <Route path="/academy/attendance" element={<ProtectedRoute allowedRoles={['academy_admin']}><ClassSessionAttendancePage mode="academy" /></ProtectedRoute>} />
         <Route path="/academy/class-reports" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyClassReportsPage /></ProtectedRoute>} />
         <Route path="/academy/progress" element={<ProtectedRoute allowedRoles={['academy_admin']}><AcademyProgressPage /></ProtectedRoute>} />

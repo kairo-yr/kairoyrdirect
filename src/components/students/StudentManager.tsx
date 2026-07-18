@@ -18,8 +18,6 @@ import {
 import { statusStyles } from '../../utils/badgeStyles';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
-import { assignStudentToBatch, getBatchesByAcademy, type Batch } from '../../lib/batchApi';
-import { getStudentScheduleSlotIds, listClassSlots, updateStudentSchedule, type ClassSlot } from '../../lib/classSessionApi';
 
 type StudentForm = {
   full_name: string;
@@ -32,10 +30,6 @@ type StudentForm = {
   parent_phone: string;
   level: StudentLevel;
   notes: string;
-  home_batch_id: string;
-  expected_weekly_frequency: '1' | '2' | '3' | '4' | 'flexible';
-  schedule_mode: 'inherited' | 'custom' | 'flexible';
-  class_slot_ids: string[];
 };
 
 const initialForm: StudentForm = {
@@ -49,10 +43,6 @@ const initialForm: StudentForm = {
   parent_phone: '',
   level: 'beginner',
   notes: '',
-  home_batch_id: '',
-  expected_weekly_frequency: '2',
-  schedule_mode: 'inherited',
-  class_slot_ids: [],
 };
 
 function statusClass(status: string) {
@@ -79,8 +69,6 @@ export function StudentManager({
   onCountChange?: (count: number) => void;
 }) {
   const [students, setStudents] = useState<Student[]>([]);
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [classSlots, setClassSlots] = useState<ClassSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [viewing, setViewing] = useState<Student | null>(null);
@@ -93,10 +81,8 @@ export function StudentManager({
     setLoading(true);
     setError('');
     try {
-      const [loadedStudents, loadedBatches, loadedSlots] = await Promise.all([getStudentsByAcademy(academyId), getBatchesByAcademy(academyId), listClassSlots(academyId)]);
+      const loadedStudents = await getStudentsByAcademy(academyId);
       setStudents(loadedStudents);
-      setBatches(loadedBatches.filter((batch) => batch.status === 'active'));
-      setClassSlots(loadedSlots);
       onCountChange?.(loadedStudents.length);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load students.');
@@ -121,8 +107,7 @@ export function StudentManager({
     setModalOpen(true);
   };
 
-  const openEditModal = async (student: Student) => {
-    const classSlotIds = student.schedule_mode === 'custom' ? await getStudentScheduleSlotIds(student.id) : [];
+  const openEditModal = (student: Student) => {
     setEditing(student);
     setForm({
       full_name: student.full_name,
@@ -135,10 +120,6 @@ export function StudentManager({
       parent_phone: student.parent_phone ?? '',
       level: student.level ?? 'beginner',
       notes: student.notes ?? '',
-      home_batch_id: student.home_batch_id ?? '',
-      expected_weekly_frequency: student.expected_weekly_frequency ?? '2',
-      schedule_mode: student.schedule_mode ?? 'inherited',
-      class_slot_ids: classSlotIds,
     });
     setModalOpen(true);
   };
@@ -153,17 +134,13 @@ export function StudentManager({
     setError('');
     setMessage('');
     try {
-      const { home_batch_id, expected_weekly_frequency, schedule_mode, class_slot_ids, ...profileForm } = form;
-      let savedStudent: Student;
       if (editing) {
-        savedStudent = await updateStudent(editing.id, profileForm);
+        await updateStudent(editing.id, form);
         setMessage('Student updated.');
       } else {
-        savedStudent = await createStudent({ academy_id: academyId, ...profileForm });
-        if (home_batch_id) await assignStudentToBatch(home_batch_id, savedStudent.id);
+        await createStudent({ academy_id: academyId, ...form });
         setMessage('Student added.');
       }
-      await updateStudentSchedule({ studentId: savedStudent.id, academyId, homeBatchId: home_batch_id || null, frequency: expected_weekly_frequency, mode: schedule_mode, classSlotIds: class_slot_ids });
       setForm(initialForm);
       setEditing(null);
       setModalOpen(false);
@@ -230,7 +207,7 @@ export function StudentManager({
                   <button className="rounded-xl border border-slate-200 p-2 text-slate-600" onClick={() => setViewing(student)} type="button" aria-label="View student" title="View student"><Eye size={16} /></button>
                   {canManage ? (
                     <>
-                      <button className="rounded-xl border border-slate-200 p-2 text-slate-600" onClick={() => void openEditModal(student)} type="button" aria-label="Edit student" title="Edit student"><Edit3 size={16} /></button>
+                      <button className="rounded-xl border border-slate-200 p-2 text-slate-600" onClick={() => openEditModal(student)} type="button" aria-label="Edit student" title="Edit student"><Edit3 size={16} /></button>
                       {student.status === 'disabled' ? (
                         <button className="rounded-xl bg-emerald-600 p-2 text-white" onClick={() => runStudentAction(() => reactivateStudent(student.id), `${student.full_name} reactivated.`)} type="button" aria-label="Reactivate student" title="Reactivate student"><RotateCcw size={16} /></button>
                       ) : (
@@ -267,16 +244,6 @@ export function StudentManager({
             ]}
           />
           <div className="rounded-2xl border border-slate-200 p-4">
-            <h3 className="text-sm font-black text-navy">Weekly Class Schedule</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">The home batch stays administrative. A custom schedule controls which recurring sessions expect this student.</p>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <FormSelect label="Home batch" value={form.home_batch_id} onChange={(event) => updateField('home_batch_id', event.target.value)} options={[{ label: 'Not assigned', value: '' }, ...batches.map((batch) => ({ label: batch.name, value: batch.id }))]} />
-              <FormSelect label="Expected classes per week" value={form.expected_weekly_frequency} onChange={(event) => updateField('expected_weekly_frequency', event.target.value)} options={[{ label: '1 class per week', value: '1' }, { label: '2 classes per week', value: '2' }, { label: '3 classes per week', value: '3' }, { label: '4 classes per week', value: '4' }, { label: 'Flexible', value: 'flexible' }]} />
-              <FormSelect className="md:col-span-2" label="Schedule source" value={form.schedule_mode} onChange={(event) => updateField('schedule_mode', event.target.value)} options={[{ label: 'Inherited from home batch', value: 'inherited' }, { label: 'Individually customised', value: 'custom' }, { label: 'Flexible / added when attending', value: 'flexible' }]} />
-            </div>
-            {form.schedule_mode === 'custom' ? <div className="mt-4 grid gap-2 sm:grid-cols-2">{classSlots.map((slot) => <label className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-sm font-bold" key={slot.id}><input className="mt-1" type="checkbox" checked={form.class_slot_ids.includes(slot.id)} onChange={(event) => setForm((current) => ({ ...current, class_slot_ids: event.target.checked ? [...current.class_slot_ids, slot.id] : current.class_slot_ids.filter((id) => id !== slot.id) }))}/><span>{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][slot.weekday - 1]} · {slot.start_time.slice(0,5)}–{slot.end_time.slice(0,5)}<span className="block text-xs font-medium text-slate-500">{slot.coach?.full_name} · {slot.location || 'Location not set'}</span></span></label>)}</div> : null}
-          </div>
-          <div className="rounded-2xl border border-slate-200 p-4">
             <h3 className="text-sm font-black text-navy">Parent / Guardian Details</h3>
             <div className="mt-4 grid gap-4">
               <FormInput label="Parent name optional" value={form.parent_name} onChange={(event) => updateField('parent_name', event.target.value)} />
@@ -302,9 +269,6 @@ export function StudentManager({
               ['School', viewing.school_name || 'Not added'],
               ['Grade', viewing.grade || 'Not added'],
               ['Level', labelize(viewing.level || 'beginner')],
-              ['Home batch', batches.find((batch) => batch.id === viewing.home_batch_id)?.name || 'Not assigned'],
-              ['Expected frequency', viewing.expected_weekly_frequency === 'flexible' ? 'Flexible' : `${viewing.expected_weekly_frequency || '2'} classes per week`],
-              ['Schedule source', labelize(viewing.schedule_mode || 'inherited')],
               ['Parent / guardian name', viewing.parent_name || 'Not added'],
               ['Parent / guardian phone', viewing.parent_phone || 'Not added'],
               ['Parent / guardian email', viewing.parent_email || 'Not added'],
