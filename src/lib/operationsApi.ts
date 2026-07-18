@@ -32,6 +32,79 @@ export const listClassReports = (academyId?: string) => list('class_reports', ac
 export const listProgressReports = (academyId?: string) => list('progress_reports', academyId);
 export const listFees = (academyId?: string) => list('fee_records', academyId);
 
+type ClassReportIdentity = {
+  academyId: string;
+  batchId: string;
+  date: string;
+  classSessionId: string;
+};
+
+async function findSessionLinkedClassReport(identity: ClassReportIdentity) {
+  const { data, error } = await supabase
+    .from('class_reports')
+    .select('*')
+    .eq('academy_id', identity.academyId)
+    .eq('class_session_id', identity.classSessionId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? unwrap(data as Record<string, unknown>) : null;
+}
+
+export async function findClassReportForSession(identity: ClassReportIdentity) {
+  const sessionReport = await findSessionLinkedClassReport(identity);
+  if (sessionReport) return sessionReport;
+
+  // Legacy reports predate class_session_id. Only an unlinked batch/date row is
+  // eligible for this fallback, so a report owned by another same-day session
+  // can never be opened accidentally.
+  const { data, error } = await supabase
+    .from('class_reports')
+    .select('*')
+    .eq('academy_id', identity.academyId)
+    .eq('batch_id', identity.batchId)
+    .eq('report_date', identity.date)
+    .is('class_session_id', null)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? unwrap(data as Record<string, unknown>) : null;
+}
+
+export async function getOrCreateClassReport(payload: Payload) {
+  const identity: ClassReportIdentity = {
+    academyId: String(payload.academyId),
+    batchId: String(payload.batchId),
+    date: String(payload.date),
+    classSessionId: String(payload.classSessionId),
+  };
+  let existing = await findClassReportForSession(identity);
+  if (existing) {
+    if (!existing.classSessionId) {
+      const { data, error } = await supabase
+        .from('class_reports')
+        .update({ class_session_id: identity.classSessionId })
+        .eq('id', existing.id)
+        .is('class_session_id', null)
+        .select('*')
+        .maybeSingle();
+      if (error && error.code !== '23505') throw error;
+      if (data) existing = unwrap(data as Record<string, unknown>);
+      else existing = await findSessionLinkedClassReport(identity) ?? existing;
+    }
+    return { report: existing, created: false };
+  }
+
+  try {
+    return { report: await saveClassReport(payload), created: true };
+  } catch (error) {
+    // Concurrent clicks may both observe no row. The unique session index is the
+    // final arbiter; the loser re-reads and opens the winner instead of failing.
+    if ((error as { code?: string })?.code !== '23505') throw error;
+    existing = await findClassReportForSession(identity);
+    if (!existing) throw error;
+    return { report: existing, created: false };
+  }
+}
+
 export async function saveAttendance(payload: Payload, id?: string) {
   const row = { academy_id: payload.academyId, batch_id: payload.batchId, coach_id: payload.coachId || null, attendance_date: payload.date, student_ids: payload.studentIds ?? [], payload };
   const query = id ? supabase.from('attendance_records').update(row).eq('id', id) : supabase.from('attendance_records').insert(row);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CalendarCheck, CheckCircle2, Plus, RotateCcw, Save, Trash2, UserPlus } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
@@ -27,6 +27,7 @@ import {
   type SessionStudentSearchResult,
 } from '../lib/classSessionApi';
 import { formatDateOnly } from '../lib/attendanceReportHistory';
+import { findClassReportForSession, getOrCreateClassReport } from '../lib/operationsApi';
 
 type Mode = 'academy' | 'coach';
 type AttendanceRow = { studentId: string; status: ParticipantStatus; note: string };
@@ -72,6 +73,7 @@ function StatusButtons({ disabled, value, onChange }: { disabled: boolean; value
 }
 
 export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
+  const navigate = useNavigate();
   const { userProfile } = useAuth();
   const isCoach = mode === 'coach';
   const { coach, loading: coachLoading } = useCurrentCoach(isCoach);
@@ -100,6 +102,8 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
   const [searching, setSearching] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [sessionReportId, setSessionReportId] = useState<string | null>(null);
+  const [reportChecking, setReportChecking] = useState(false);
 
   const hydrateSession = (next: ClassSession) => {
     setParticipantsError('');
@@ -154,6 +158,21 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
 
   useEffect(() => { void loadPage(); }, [academyId, coach?.id]);
   useEffect(() => {
+    let active = true;
+    if (!academyId || !session) {
+      setSessionReportId(null);
+      return;
+    }
+    const batchId = session.session_source_batches?.[0]?.batch_id ?? '';
+    if (!batchId) return;
+    setReportChecking(true);
+    void findClassReportForSession({ academyId, batchId, date: session.session_date, classSessionId: session.id })
+      .then((report) => { if (active) setSessionReportId(report ? String(report.id) : null); })
+      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : 'Could not check class report.'); })
+      .finally(() => { if (active) setReportChecking(false); });
+    return () => { active = false; };
+  }, [academyId, session?.id]);
+  useEffect(() => {
     if (!addStudentOpen || !session) return;
     const timer = window.setTimeout(async () => {
       setSearching(true);
@@ -170,6 +189,50 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
   const sessionBatchId = session?.session_source_batches?.[0]?.batch_id ?? '';
   const activeBatchStudentCount = batches.find((batch) => batch.id === sessionBatchId)?.studentIds.length ?? 0;
   const canComplete = canEdit && !saving && !participantsLoading && !participantsError && rows.length>0 && !(activeBatchStudentCount>0 && scheduledParticipants.length===0);
+
+  const openClassReport = async () => {
+    if (!academyId || !session || !userProfile || !sessionBatchId) return;
+    const batch = batches.find((item) => item.id === sessionBatchId);
+    setReportChecking(true);
+    setError('');
+    try {
+      const participants = session.session_participants ?? [];
+      const { report } = await getOrCreateClassReport({
+        academyId,
+        batchId: sessionBatchId,
+        batchName: batch?.name ?? session.session_source_batches?.[0]?.batch?.name ?? 'Class',
+        coachId: batch?.coachId ?? session.coach_id ?? null,
+        coachName: batch?.coachName ?? session.coach?.full_name ?? null,
+        date: session.session_date,
+        attendanceId: `session:${session.id}`,
+        classSessionId: session.id,
+        title: `Class Report - ${batch?.name ?? session.session_source_batches?.[0]?.batch?.name ?? 'Class'} - ${session.session_date}`,
+        topicCovered: '', classSummary: '', homeworkGiven: '', nextClassPlan: '', studentPerformanceNotes: '',
+        studentsPresentIds: participants.filter((participant) => ['present', 'late'].includes(participant.attendance_status)).map((participant) => participant.student_id),
+        studentsAbsentIds: participants.filter((participant) => !['present', 'late'].includes(participant.attendance_status)).map((participant) => participant.student_id),
+        studentNotes: participants.map((participant) => ({
+          studentId: participant.student_id,
+          studentName: participant.student?.full_name ?? 'Student',
+          note: '',
+          performanceTag: 'not_reviewed',
+          participationLabel: participantBadge(participant) ?? undefined,
+        })),
+        status: 'draft',
+        createdByUid: userProfile.uid,
+        createdByName: userProfile.name,
+        createdByRole: isCoach ? 'coach' : 'academy_admin',
+        updatedByUid: null,
+        updatedByName: null,
+      });
+      const reportId = String(report.id);
+      setSessionReportId(reportId);
+      navigate(`/${mode === 'coach' ? 'coach' : 'academy'}/class-reports?sessionId=${session.id}&batchId=${sessionBatchId}&reportId=${reportId}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not create or open the class report.');
+    } finally {
+      setReportChecking(false);
+    }
+  };
 
   const openSelectedClass = async () => {
     if (!selectedBatchId || !selectedDate || !selectedStartTime || !selectedEndTime) return setError('Choose a batch, class date, start time, and end time.');
@@ -265,7 +328,7 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
             <button disabled={!canComplete} className="inline-flex items-center gap-2 rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" onClick={() => void persistAttendance(true)}><CheckCircle2 size={17}/>Complete attendance</button>
           </div> : <div className="mt-5 flex flex-wrap justify-end gap-2">
             {mode === 'academy' ? <button className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-navy" onClick={async () => { setSaving(true); setError(''); try { await reopenClassSession(session.id); await refreshClassSessionRoster(session.id); await reloadSessionAndHistory(session.id); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not reopen attendance.'); } finally { setSaving(false); } }}>Reopen attendance</button> : null}
-            <Link className="rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white" to={`/${mode === 'coach' ? 'coach' : 'academy'}/class-reports?sessionId=${session.id}&batchId=${session.session_source_batches?.[0]?.batch_id ?? ''}`}>Create class report</Link>
+            <button disabled={reportChecking} className="rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60" onClick={() => void openClassReport()}>{reportChecking ? 'Opening report…' : sessionReportId ? 'Open class report' : 'Create class report'}</button>
           </div>}
         </>}
       </section>

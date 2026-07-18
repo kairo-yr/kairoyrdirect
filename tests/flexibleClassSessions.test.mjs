@@ -6,7 +6,9 @@ const originalMigration = readFileSync(new URL('../supabase/migrations/202607180
 const migration = readFileSync(new URL('../supabase/migrations/202607181_simple_batch_attendance_sessions.sql', import.meta.url), 'utf8');
 const ambiguityFix = readFileSync(new URL('../supabase/migrations/202607182_fix_batch_session_rpc_ambiguity.sql', import.meta.url), 'utf8');
 const rosterFix = readFileSync(new URL('../supabase/migrations/202607183_backfill_scheduled_session_participants.sql', import.meta.url), 'utf8');
+const reportIdentity = readFileSync(new URL('../supabase/migrations/202607184_class_report_session_identity.sql', import.meta.url), 'utf8');
 const api = readFileSync(new URL('../src/lib/classSessionApi.ts', import.meta.url), 'utf8');
+const operations = readFileSync(new URL('../src/lib/operationsApi.ts', import.meta.url), 'utf8');
 const attendance = readFileSync(new URL('../src/pages/ClassSessionAttendancePage.tsx', import.meta.url), 'utf8');
 const reports = readFileSync(new URL('../src/pages/AcademyClassReportsPage.tsx', import.meta.url), 'utf8');
 const routes = readFileSync(new URL('../src/routes/AppRoutes.tsx', import.meta.url), 'utf8');
@@ -115,4 +117,20 @@ test('draft reports reconcile session participants while preserving saved notes'
   assert.match(reports, /Removed from session/);
   assert.match(reports, /participationLabel/);
   assert.match(reports, /classSessionId: requestedSessionId/);
+});
+
+test('class reports are idempotent per session and retain a narrow legacy fallback', () => {
+  assert.match(reportIdentity, /class_reports_one_per_session_uidx/);
+  assert.match(reportIdentity, /drop constraint if exists class_reports_batch_id_report_date_key/);
+  assert.match(reportIdentity, /having count\(distinct cs\.id\)=1/);
+  assert.doesNotMatch(reportIdentity, /delete from public\.class_reports|truncate/i);
+  assert.match(operations, /findClassReportForSession/);
+  assert.match(operations, /getOrCreateClassReport/);
+  assert.match(operations, /error as \{ code\?: string \}\)\?\.code !== '23505'/);
+  assert.match(operations, /\.is\('class_session_id', null\)/);
+  assert.match(reports, /getOrCreateClassReport/);
+  assert.match(attendance, /sessionReportId \? 'Open class report' : 'Create class report'/);
+  assert.match(attendance, /Opening report…/);
+  assert.match(attendance, /disabled=\{reportChecking\}/);
+  assert.match(attendance, /reportId=\$\{reportId\}/);
 });
