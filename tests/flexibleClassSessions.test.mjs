@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const originalMigration = readFileSync(new URL('../supabase/migrations/202607180_flexible_class_sessions.sql', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../supabase/migrations/202607181_simple_batch_attendance_sessions.sql', import.meta.url), 'utf8');
+const ambiguityFix = readFileSync(new URL('../supabase/migrations/202607182_fix_batch_session_rpc_ambiguity.sql', import.meta.url), 'utf8');
 const api = readFileSync(new URL('../src/lib/classSessionApi.ts', import.meta.url), 'utf8');
 const attendance = readFileSync(new URL('../src/pages/ClassSessionAttendancePage.tsx', import.meta.url), 'utf8');
 const reports = readFileSync(new URL('../src/pages/AcademyClassReportsPage.tsx', import.meta.url), 'utf8');
@@ -22,6 +23,17 @@ test('batch and date identify one simple class session', () => {
   assert.match(migration, /academy_id, primary_batch_id, session_date, start_time/);
   assert.match(migration, /find_or_create_batch_class_session/);
   assert.match(api, /rpc\('find_or_create_batch_class_session'/);
+});
+
+test('batch session RPC has no PL/pgSQL session_id variable ambiguity', () => {
+  assert.match(ambiguityFix, /v_session_id uuid/);
+  assert.doesNotMatch(ambiguityFix, /declare[\s\S]*?\bsession_id uuid/);
+  assert.match(ambiguityFix, /where bcs\.academy_id=v_batch\.academy_id/);
+  assert.match(ambiguityFix, /where bm\.batch_id=v_batch\.id/);
+  assert.match(ambiguityFix, /on conflict on constraint session_source_batches_session_id_batch_id_key/);
+  assert.match(ambiguityFix, /on conflict on constraint session_participants_session_id_student_id_key/);
+  assert.doesNotMatch(ambiguityFix, /where\s+(session_id|student_id|batch_id|academy_id)\s*=\s*\1/i);
+  assert.match(ambiguityFix, /return v_session_id/);
 });
 
 test('scheduled roster comes directly from permanent active batch membership', () => {
