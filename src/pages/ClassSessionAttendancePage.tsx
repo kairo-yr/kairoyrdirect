@@ -55,7 +55,20 @@ function participantBadge(participant: SessionParticipant) {
   return labels[participant.source_type] ?? null;
 }
 function isScheduled(participant: SessionParticipant) {
-  return participant.source_type === 'batch' || participant.source_type === 'individual_schedule';
+  return participant.source_type === 'scheduled' || participant.source_type === 'batch' || participant.source_type === 'individual_schedule';
+}
+
+function StatusButtons({ disabled, value, onChange }: { disabled: boolean; value: ParticipantStatus; onChange: (status: ParticipantStatus) => void }) {
+  return <div>
+    <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Attendance</p>
+    <div className="flex flex-wrap gap-1.5">{statuses.map((status) => <button
+      className={`rounded-lg border px-2.5 py-2 text-xs font-black transition ${value === status.value ? 'border-directBlue bg-directBlue text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'} disabled:cursor-not-allowed disabled:opacity-60`}
+      disabled={disabled}
+      key={status.value}
+      onClick={() => onChange(status.value)}
+      type="button"
+    >{status.label}</button>)}</div>
+  </div>;
 }
 
 export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
@@ -81,12 +94,15 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [participantsError, setParticipantsError] = useState('');
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   const hydrateSession = (next: ClassSession) => {
+    setParticipantsError('');
     setSession(next);
     setRows((next.session_participants ?? []).map((participant) => ({
       studentId: participant.student_id,
@@ -98,7 +114,20 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
     setSearchParams(params, { replace: true });
   };
 
-  const reloadSession = async (id: string) => hydrateSession(await getClassSession(id));
+  const reloadSession = async (id: string) => {
+    setParticipantsLoading(true);
+    setParticipantsError('');
+    try { hydrateSession(await getClassSession(id)); }
+    catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Could not load session participants.';
+      setParticipantsError(message);
+      throw caught;
+    } finally { setParticipantsLoading(false); }
+  };
+  const reloadSessionAndHistory = async (id: string) => {
+    await reloadSession(id);
+    if (academyId) setSessions(await listClassSessions(academyId));
+  };
   const loadPage = async () => {
     if (!academyId || (isCoach && !coach?.id)) return;
     setLoading(true);
@@ -136,6 +165,11 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
   }, [addStudentOpen, session?.id, studentSearch]);
 
   const canEdit = Boolean(session && session.status !== 'completed' && session.status !== 'cancelled');
+  const scheduledParticipants = (session?.session_participants ?? []).filter(isScheduled);
+  const addedParticipants = (session?.session_participants ?? []).filter((participant) => !isScheduled(participant));
+  const sessionBatchId = session?.session_source_batches?.[0]?.batch_id ?? '';
+  const activeBatchStudentCount = batches.find((batch) => batch.id === sessionBatchId)?.studentIds.length ?? 0;
+  const canComplete = canEdit && !saving && !participantsLoading && !participantsError && rows.length>0 && !(activeBatchStudentCount>0 && scheduledParticipants.length===0);
 
   const openSelectedClass = async () => {
     if (!selectedBatchId || !selectedDate || !selectedStartTime || !selectedEndTime) return setError('Choose a batch, class date, start time, and end time.');
@@ -158,7 +192,7 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
     setError('');
     try {
       await addStudentToSession({ sessionId: session.id, studentId: selectedStudent.id, reason, note });
-      await reloadSession(session.id);
+      await reloadSessionAndHistory(session.id);
       setSelectedStudent(null); setStudentSearch(''); setNote(''); setReason('makeup'); setAddStudentOpen(false);
       setMessage(`${selectedStudent.full_name} was added to this class only.`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not add this student.'); }
@@ -167,6 +201,10 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
 
   const persistAttendance = async (complete: boolean) => {
     if (!session) return;
+    if (complete && participantsLoading) return setError('Wait for session participants to finish loading.');
+    if (complete && participantsError) return setError('Participants could not be loaded. Retry before completing attendance.');
+    if (complete && rows.length===0) return setError(activeBatchStudentCount ? 'Scheduled batch students have not loaded. Refresh the roster before completing attendance.' : 'This batch has no active students. Add students to the batch or add a student to this class.');
+    if (complete && activeBatchStudentCount>0 && scheduledParticipants.length===0) return setError('Scheduled batch students have not loaded. Refresh the roster before completing attendance.');
     setSaving(true);
     setError('');
     try {
@@ -202,27 +240,31 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
               {canEdit ? <button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-navy" onClick={() => { setError(''); setAddStudentOpen(true); }}><UserPlus size={16}/>Add student</button> : null}
             </div>
           </div>
-          <div className="mt-4 space-y-3">
-            {(session.session_participants ?? []).map((participant) => {
+          {participantsError ? <div className="mt-4 rounded-2xl bg-rose-50 p-4 text-sm font-bold text-rose-700">{participantsError}</div> : null}
+          {participantsLoading ? <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm font-semibold text-slate-600">Loading session participants…</div> : null}
+          {!participantsLoading && !participantsError && (session.session_participants ?? []).length===0 ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">This batch has no active students. Add students to the batch or add a student to this class.</div> : null}
+          {[{ title: 'Scheduled students', participants: scheduledParticipants }, { title: 'Additional students', participants: addedParticipants }].map((group) => group.participants.length ? <div className="mt-5" key={group.title}>
+            <h3 className="text-sm font-black uppercase tracking-wide text-slate-500">{group.title}</h3>
+            <div className="mt-3 space-y-3">{group.participants.map((participant) => {
               const row = rows.find((item) => item.studentId === participant.student_id);
               const addedBadge = participantBadge(participant);
-              return <div className="grid gap-3 rounded-2xl border border-slate-100 p-4 lg:grid-cols-[minmax(180px,1fr)_180px_minmax(180px,1fr)_auto] lg:items-center" key={participant.id}>
+              return <div className="grid gap-3 rounded-2xl border border-slate-100 p-4 lg:grid-cols-[minmax(180px,1fr)_minmax(300px,1.4fr)_minmax(180px,1fr)_auto] lg:items-center" key={participant.id}>
                 <div>
                   <div className="flex flex-wrap items-center gap-2"><span className="font-black text-navy">{participant.student?.full_name ?? 'Student'}</span>{addedBadge ? <Badge className="bg-amber-50 text-amber-700 ring-amber-100">{addedBadge}</Badge> : null}</div>
                   <p className="mt-1 text-xs text-slate-500">{isScheduled(participant) ? 'Scheduled student' : `${participant.student?.home_batch?.name ?? 'No current batch'}${participant.added_note ? ` · ${participant.added_note}` : ''}`}</p>
                 </div>
-                <FormSelect label="Status" disabled={!canEdit} value={row?.status ?? 'present'} onChange={(event) => setRows((current) => current.map((item) => item.studentId === participant.student_id ? { ...item, status: event.target.value as ParticipantStatus } : item))} options={statuses}/>
+                <StatusButtons disabled={!canEdit} value={row?.status ?? 'present'} onChange={(status) => setRows((current) => current.map((item) => item.studentId === participant.student_id ? { ...item, status } : item))}/>
                 <FormInput label="Attendance note" disabled={!canEdit} value={row?.note ?? ''} onChange={(event) => setRows((current) => current.map((item) => item.studentId === participant.student_id ? { ...item, note: event.target.value } : item))}/>
-                {!isScheduled(participant) && canEdit ? <button aria-label={`Remove ${participant.student?.full_name ?? 'student'}`} className="rounded-xl p-2 text-rose-600 hover:bg-rose-50" onClick={async () => { if (!window.confirm('Remove this added student from this class?')) return; await removeStudentFromSession(session.id, participant.student_id); await reloadSession(session.id); }}><Trash2 size={18}/></button> : <span/>}
+                {!isScheduled(participant) && canEdit ? <button aria-label={`Remove ${participant.student?.full_name ?? 'student'}`} className="rounded-xl p-2 text-rose-600 hover:bg-rose-50" onClick={async () => { if (!window.confirm('Remove this added student from this class?')) return; setSaving(true); setError(''); try { await removeStudentFromSession(session.id, participant.student_id); await reloadSessionAndHistory(session.id); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not remove this student.'); } finally { setSaving(false); } }}><Trash2 size={18}/></button> : <span/>}
               </div>;
-            })}
-          </div>
+            })}</div>
+          </div> : null)}
           {canEdit ? <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <button disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-navy" onClick={async () => { await refreshClassSessionRoster(session.id); await reloadSession(session.id); }}><RotateCcw size={17}/>Refresh batch students</button>
-            <button disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-blue-200 px-4 py-3 text-sm font-black text-directBlue" onClick={() => void persistAttendance(false)}><Save size={17}/>Save draft</button>
-            <button disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white" onClick={() => void persistAttendance(true)}><CheckCircle2 size={17}/>Complete attendance</button>
+            <button disabled={saving || participantsLoading} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-navy disabled:opacity-50" onClick={async () => { setSaving(true); setError(''); try { await refreshClassSessionRoster(session.id); await reloadSessionAndHistory(session.id); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not refresh batch students.'); } finally { setSaving(false); } }}><RotateCcw size={17}/>Refresh batch students</button>
+            <button disabled={saving || participantsLoading || Boolean(participantsError) || rows.length===0} className="inline-flex items-center gap-2 rounded-xl border border-blue-200 px-4 py-3 text-sm font-black text-directBlue disabled:opacity-50" onClick={() => void persistAttendance(false)}><Save size={17}/>Save draft</button>
+            <button disabled={!canComplete} className="inline-flex items-center gap-2 rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" onClick={() => void persistAttendance(true)}><CheckCircle2 size={17}/>Complete attendance</button>
           </div> : <div className="mt-5 flex flex-wrap justify-end gap-2">
-            {mode === 'academy' ? <button className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-navy" onClick={async () => { await reopenClassSession(session.id); await reloadSession(session.id); }}>Reopen attendance</button> : null}
+            {mode === 'academy' ? <button className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-navy" onClick={async () => { setSaving(true); setError(''); try { await reopenClassSession(session.id); await refreshClassSessionRoster(session.id); await reloadSessionAndHistory(session.id); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not reopen attendance.'); } finally { setSaving(false); } }}>Reopen attendance</button> : null}
             <Link className="rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white" to={`/${mode === 'coach' ? 'coach' : 'academy'}/class-reports?sessionId=${session.id}&batchId=${session.session_source_batches?.[0]?.batch_id ?? ''}`}>Create class report</Link>
           </div>}
         </>}
@@ -233,7 +275,7 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
         <div className="mt-3 max-h-[70vh] space-y-2 overflow-y-auto">{loadError ? <p className="text-sm font-semibold text-rose-600">Could not load class sessions.</p> : sessions.length ? sessions.map((item) => <button className={`w-full rounded-2xl border p-3 text-left ${session?.id === item.id ? 'border-blue-300 bg-blue-50' : 'border-slate-100 hover:bg-slate-50'}`} key={item.id} onClick={() => void reloadSession(item.id)}>
           <div className="flex items-center justify-between gap-2"><span className="text-sm font-black text-navy">{item.session_source_batches?.[0]?.batch?.name ?? 'Historical class'}</span><Badge className="bg-slate-100 text-slate-700 ring-slate-200">{item.status}</Badge></div>
           <p className="mt-1 text-xs font-semibold text-slate-500">{formatDateOnly(item.session_date)} · {timeLabel(item.start_time)}–{timeLabel(item.end_time)}</p>
-          <p className="mt-1 text-xs text-slate-500">{item.session_participants?.length ?? 0} students · {(item.session_participants ?? []).filter((p) => !isScheduled(p)).length} added</p>
+          <p className="mt-1 text-xs text-slate-500">{item.session_participants?.length ?? 0} participants · {(item.session_participants ?? []).filter((p) => !isScheduled(p)).length} added</p>
         </button>) : <p className="text-sm text-slate-500">No class sessions yet.</p>}</div>
       </aside>
     </div>

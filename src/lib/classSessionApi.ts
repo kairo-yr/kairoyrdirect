@@ -2,7 +2,7 @@ import { supabase } from './supabaseClient';
 
 export type SessionStatus = 'draft' | 'open' | 'completed' | 'cancelled';
 export type ParticipantStatus = 'unmarked' | 'present' | 'late' | 'absent' | 'excused';
-export type ParticipantSource = 'batch' | 'makeup' | 'extra_class' | 'temporary' | 'trial' | 'other' | 'individual_schedule' | 'compensation' | 'rescheduled' | 'temporary_transfer' | 'manual_other';
+export type ParticipantSource = 'scheduled' | 'batch' | 'makeup' | 'extra_class' | 'temporary' | 'trial' | 'other' | 'individual_schedule' | 'compensation' | 'rescheduled' | 'temporary_transfer' | 'manual_other';
 
 export type SessionBatch = {
   id: string; batch_id: string; source_type: 'automatic' | 'manual';

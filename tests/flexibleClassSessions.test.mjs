@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const originalMigration = readFileSync(new URL('../supabase/migrations/202607180_flexible_class_sessions.sql', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../supabase/migrations/202607181_simple_batch_attendance_sessions.sql', import.meta.url), 'utf8');
 const ambiguityFix = readFileSync(new URL('../supabase/migrations/202607182_fix_batch_session_rpc_ambiguity.sql', import.meta.url), 'utf8');
+const rosterFix = readFileSync(new URL('../supabase/migrations/202607183_backfill_scheduled_session_participants.sql', import.meta.url), 'utf8');
 const api = readFileSync(new URL('../src/lib/classSessionApi.ts', import.meta.url), 'utf8');
 const attendance = readFileSync(new URL('../src/pages/ClassSessionAttendancePage.tsx', import.meta.url), 'utf8');
 const reports = readFileSync(new URL('../src/pages/AcademyClassReportsPage.tsx', import.meta.url), 'utf8');
@@ -44,6 +45,27 @@ test('scheduled roster comes directly from permanent active batch membership', (
   assert.doesNotMatch(body, /recurring_class_slots|batch_class_slots|student_class_schedules|schedule_mode/);
 });
 
+test('scheduled participant backfill uses current active membership and defaults to present', () => {
+  assert.match(rosterFix, /from public\.batch_students as bm/);
+  assert.match(rosterFix, /bm\.status='active'/);
+  assert.match(rosterFix, /s\.status='active'/);
+  assert.match(rosterFix, /'scheduled',v_batch\.id,'present'/);
+  assert.doesNotMatch(rosterFix, /bm\.joined_at[^\n]*(target_date|session_date)/);
+  assert.doesNotMatch(rosterFix, /bm\.removed_at[^\n]*(target_date|session_date)/);
+  assert.match(rosterFix, /on conflict on constraint session_participants_session_id_student_id_key do nothing/);
+});
+
+test('only completed zero-participant sessions are automatically reopened for repair', () => {
+  assert.match(rosterFix, /v_session_status='completed' and v_existing_participant_count=0/);
+  assert.match(rosterFix, /set status='open',completed_at=null,completed_by=null/);
+});
+
+test('outside students default to present without changing batch membership', () => {
+  assert.match(rosterFix, /target_student,reason,v_home_batch_id,reason,nullif\(trim\(note\),''\),'present'/);
+  const addStudentBody = rosterFix.slice(rosterFix.indexOf('create or replace function public.add_student_to_class_session'), rosterFix.indexOf('create or replace function public.remove_student_from_class_session'));
+  assert.doesNotMatch(addStudentBody, /insert into public\.batch_students|update public\.batch_students/);
+});
+
 test('one student can occur only once in a session', () => {
   assert.match(originalMigration, /unique\(session_id,student_id\)/);
   assert.match(migration, /on conflict\(session_id,student_id\) do nothing/);
@@ -71,6 +93,11 @@ test('attendance UI supports search, reasons, removal, and responsive rows', () 
   assert.match(attendance, /removeStudentFromSession/);
   assert.match(attendance, /lg:grid-cols-\[minmax/);
   assert.doesNotMatch(attendance, /<table/);
+  assert.match(attendance, /Scheduled students/);
+  assert.match(attendance, /Additional students/);
+  assert.match(attendance, /StatusButtons/);
+  assert.match(attendance, /disabled=\{!canComplete\}/);
+  assert.match(attendance, /participants ·/);
 });
 
 test('session query disambiguates the participant foreign key and logs Supabase diagnostics', () => {
