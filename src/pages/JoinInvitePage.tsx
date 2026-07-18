@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import { CheckCircle2, LogIn, ShieldAlert } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { BrandMark } from '../components/ui/BrandMark';
 import { useAuth, isInviteExpired } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { findInviteByToken } from '../lib/operationsApi';
 import type { AcademyInvite, InvitableRole } from '../types/auth';
 import { getProfileRedirectPath } from '../utils/roleRedirects';
 
@@ -15,17 +14,11 @@ type LinkedProfile = {
 };
 
 const roleLabels: Record<InvitableRole, string> = {
-  coach: 'Coach',
   student: 'Student',
 };
 
 function isInvitableRole(value: string | undefined): value is InvitableRole {
-  return value === 'coach' || value === 'student';
-}
-
-function profileCollection(role: InvitableRole) {
-  if (role === 'coach') return 'coaches';
-  return 'students';
+  return value === 'student';
 }
 
 export function JoinInvitePage() {
@@ -49,14 +42,13 @@ export function JoinInvitePage() {
           return;
         }
 
-        const inviteQuery = query(collection(db, 'academyInvites'), where('inviteToken', '==', inviteToken), limit(1));
-        const inviteSnapshot = await getDocs(inviteQuery);
-        if (inviteSnapshot.empty) {
+        const inviteRow = await findInviteByToken(inviteToken);
+        if (!inviteRow) {
           setError('This invite was not found.');
           return;
         }
 
-        const loadedInvite = { id: inviteSnapshot.docs[0].id, ...inviteSnapshot.docs[0].data() } as AcademyInvite;
+        const loadedInvite = inviteRow as AcademyInvite & { academyName?: string; profileName?: string };
         if (loadedInvite.role !== role) {
           setError('This invite role does not match the link.');
           return;
@@ -70,14 +62,9 @@ export function JoinInvitePage() {
           return;
         }
 
-        const [academySnapshot, profileSnapshot] = await Promise.all([
-          getDoc(doc(db, 'academies', loadedInvite.academyId)),
-          getDoc(doc(db, 'academies', loadedInvite.academyId, profileCollection(loadedInvite.role), loadedInvite.linkedProfileId)),
-        ]);
-
         setInvite(loadedInvite);
-        setAcademyName(academySnapshot.exists() ? String(academySnapshot.data().name ?? 'Academy') : 'Academy');
-        setProfile(profileSnapshot.exists() ? profileSnapshot.data() as LinkedProfile : null);
+        setAcademyName(loadedInvite.academyName ?? 'Academy');
+        setProfile({ name: loadedInvite.profileName });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : 'Could not load this invite.');
       } finally {

@@ -7,7 +7,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { StatCard } from '../components/ui/StatCard';
 import { getAcademies, getAuditLogs, type Academy, type AcademyCounts, type AuditLog } from '../lib/academyApi';
 import { getAcademyStatusClass } from '../utils/academyStatus';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { RoleDashboard } from './RoleDashboard';
 
 const initialCounts: AcademyCounts = {
@@ -85,7 +85,7 @@ export function SuperAdminDashboard() {
                 <td className="px-5 py-4 font-black text-navy">{academy.name}</td>
                 <td className="px-5 py-4 text-slate-600">{academy.owner_email || 'Not available'}</td>
                 <td className="px-5 py-4"><Badge className={getAcademyStatusClass(academy.status)}>{academy.status}</Badge></td>
-                <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(academy.created_at)}</td>
+                <td className="px-5 py-4 text-slate-600">{formatDateTime(academy.created_at)}</td>
                 <td className="px-5 py-4"><Link className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700" to={`/super-admin/academies/${academy.id}`}>Review</Link></td>
               </tr>
             ))}
@@ -103,7 +103,7 @@ export function SuperAdminDashboard() {
           <DataTable columns={['Created', 'Actor', 'Action', 'Target', 'Message']}>
             {auditLogs.map((log) => (
               <tr className="border-t border-slate-100" key={log.id}>
-                <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(log.created_at)}</td>
+                <td className="px-5 py-4 text-slate-600">{formatDateTime(log.created_at)}</td>
                 <td className="px-5 py-4 text-slate-600">{log.actor?.email || log.actor_user_id || 'Not available'}</td>
                 <td className="px-5 py-4 font-black text-navy">{log.action || 'Not available'}</td>
                 <td className="px-5 py-4 text-slate-600">{log.entity_type || 'Not available'}</td>

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { BarChart3, Edit, Eye, Save, Target } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -10,9 +9,10 @@ import { Modal } from '../components/ui/Modal';
 import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrentCoach } from '../hooks/useCurrentCoach';
-import { db } from '../lib/firebase';
-import { getCoachWorkspace } from '../lib/coachWorkspaceApi';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { getAcademyWorkspace, getCoachWorkspace } from '../lib/coachWorkspaceApi';
+import { listAttendance, listClassReports, listProgressReports, saveProgressReport } from '../lib/operationsApi';
+import { getCurrentUserStudent } from '../lib/studentApi';
+import { formatDateTime } from '../utils/dateFormat';
 import { createAuditLog } from '../utils/superAdminActions';
 
 type ProgressMode = 'academy' | 'coach' | 'student';
@@ -182,25 +182,11 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
 
   const loadProgress = async (visibleStudents: StudentRecord[]) => {
     if (!academyId) return;
-    if (isStudentMode && linkedStudentId) {
-      const progressSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'progressReports'), where('studentId', '==', linkedStudentId)));
-      setProgressReports(progressSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressReport).sort((a, b) => b.date.localeCompare(a.date)));
-      return;
-    }
-    if (isCoachMode) {
-      const reports = new Map<string, ProgressReport>();
-      for (const student of visibleStudents) {
-        const progressSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'progressReports'), where('studentId', '==', student.id)));
-        progressSnapshot.docs.forEach((docSnap) => reports.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ProgressReport));
-      }
-      setProgressReports(Array.from(reports.values()).sort((a, b) => b.date.localeCompare(a.date)));
-      return;
-    }
-    const progressSnapshot = await getDocs(collection(db, 'academies', academyId, 'progressReports'));
+    const progressSnapshot = await listProgressReports(academyId);
     const visibleStudentIds = new Set(visibleStudents.map((student) => student.id));
     setProgressReports(
-      progressSnapshot.docs
-        .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressReport)
+      progressSnapshot
+        .map((row) => row as unknown as ProgressReport)
         .filter((report) => visibleStudentIds.has(report.studentId))
         .sort((a, b) => b.date.localeCompare(a.date)),
     );
@@ -215,32 +201,20 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
       setLoading(true);
       try {
         if (isStudentMode && linkedStudentId) {
-          const studentSnapshot = await getDoc(doc(db, 'academies', academyId, 'students', linkedStudentId));
-          const loadedStudent = studentSnapshot.exists() ? ({ id: studentSnapshot.id, ...studentSnapshot.data() } as StudentRecord) : null;
-          const [batchSnapshot, attendanceSnapshot, presentSnapshot, absentSnapshot] = await Promise.all([
-            getDocs(query(collection(db, 'academies', academyId, 'batches'), where('studentIds', 'array-contains', linkedStudentId))),
-            getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('studentIds', 'array-contains', linkedStudentId))),
-            getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsPresentIds', 'array-contains', linkedStudentId))),
-            getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsAbsentIds', 'array-contains', linkedStudentId))),
-          ]);
-          const loadedBatches = batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord);
-          const reports = new Map<string, ClassReportRecord>();
-          [...presentSnapshot.docs, ...absentSnapshot.docs].forEach((docSnap) => {
-            reports.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ClassReportRecord);
-          });
+          const [studentRow, workspace, attendanceRows, reportRows] = await Promise.all([getCurrentUserStudent(academyId), getAcademyWorkspace(academyId), listAttendance(academyId), listClassReports(academyId)]);
+          const loadedStudent = studentRow ? ({ id: studentRow.id, name: studentRow.full_name, status: studentRow.status } as StudentRecord) : null;
+          const loadedBatches = workspace.batches.filter((batch) => batch.studentIds.includes(linkedStudentId));
 
           setBatches(loadedBatches);
           setStudents(loadedStudent && loadedStudent.status !== 'disabled' ? [loadedStudent] : []);
-          setAttendanceRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord));
+          setAttendanceRecords(attendanceRows.map((row) => row as AttendanceRecord));
           setSelectedStudentId(loadedStudent?.id ?? '');
-          setClassReports(Array.from(reports.values()).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))));
+          setClassReports(reportRows.map((row) => row as ClassReportRecord).sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))));
           await loadProgress(loadedStudent ? [loadedStudent] : []);
           return;
         }
 
-        const attendanceSnapshot = isCoachMode && coachId
-          ? await getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', coachId)))
-          : await getDocs(collection(db, 'academies', academyId, 'attendance'));
+        const attendanceSnapshot = await listAttendance(academyId);
         let activeBatches: BatchRecord[];
         let loadedStudents: StudentRecord[];
         if (isCoachMode && coachId) {
@@ -248,23 +222,17 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
           activeBatches = workspace.batches;
           loadedStudents = workspace.students;
         } else {
-          const batchSnapshot = await getDocs(collection(db, 'academies', academyId, 'batches'));
-          activeBatches = batchSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord)
-            .filter((batch) => batch.status === 'active');
-          const studentDocs = await getDocs(collection(db, 'academies', academyId, 'students'));
-          loadedStudents = studentDocs.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as StudentRecord)
-            .filter((student) => student.status !== 'disabled')
-            .filter((student) => !isStudentMode || student.id === linkedStudentId);
+          const workspace = await getAcademyWorkspace(academyId);
+          activeBatches = workspace.batches;
+          loadedStudents = workspace.students;
         }
         setBatches(activeBatches);
         setStudents(loadedStudents);
         const activeBatchIds = new Set(activeBatches.map((batch) => batch.id));
         const visibleStudentIdsForAttendance = new Set(activeBatches.flatMap((batch) => batch.studentIds));
         setAttendanceRecords(
-          attendanceSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
+          attendanceSnapshot
+            .map((row) => row as AttendanceRecord)
             .filter((record) =>
               !isCoachMode
               || Boolean(record.batchId && activeBatchIds.has(record.batchId))
@@ -345,8 +313,7 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
     setSaving(true);
     setError('');
     try {
-      const progressRef = doc(collection(db, 'academies', academyId, 'progressReports'));
-      await setDoc(progressRef, {
+      const savedProgress = await saveProgressReport({
         academyId,
         studentId: selectedStudent.id,
         studentName: selectedStudent.name,
@@ -365,18 +332,16 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
         createdByRole: isCoachMode ? 'coach' : 'academy_admin',
         updatedByUid: null,
         updatedByName: null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
       await createAuditLog({
         actor: userProfile,
         action: 'academy.progress.created',
         targetType: 'progressReport',
-        targetId: progressRef.id,
+        targetId: String(savedProgress.id),
         academyId,
         message: `${selectedStudent.name} progress updated.`,
         metadata: {
-          progressId: progressRef.id,
+          progressId: savedProgress.id,
           studentId: selectedStudent.id,
           batchId: selectedBatch?.id ?? null,
           coachId: selectedBatch?.coachId ?? null,
@@ -407,7 +372,8 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
     setSaving(true);
     setError('');
     try {
-      await updateDoc(doc(db, 'academies', academyId, 'progressReports', editReport.id), {
+      await saveProgressReport({
+        ...editReport,
         date: editReport.date,
         ratings: editReport.ratings,
         strengths: editReport.strengths.trim(),
@@ -416,8 +382,7 @@ function ProgressSystemPage({ mode }: { mode: ProgressMode }) {
         coachNotes: editReport.coachNotes.trim(),
         updatedByUid: userProfile.uid,
         updatedByName: userProfile.name,
-        updatedAt: serverTimestamp(),
-      });
+      }, editReport.id);
       await createAuditLog({
         actor: userProfile,
         action: 'academy.progress.updated',
@@ -770,7 +735,7 @@ function ProgressDetailModal({ report, onClose }: { report: ProgressReport | nul
             <DetailCard label="Next Focus" value={report.nextFocus} />
             <DetailCard label="Coach Notes" value={report.coachNotes} />
             <DetailCard label="Created By" value={report.createdByName} />
-            <DetailCard label="Updated" value={formatFirestoreDate(report.updatedAt)} />
+            <DetailCard label="Updated" value={formatDateTime(report.updatedAt)} />
           </div>
         </div>
       ) : null}

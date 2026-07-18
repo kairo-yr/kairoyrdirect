@@ -23,6 +23,9 @@ export type Student = {
   secondary_parent_email: string | null;
   secondary_parent_phone: string | null;
   level: StudentLevel | null;
+  home_batch_id: string | null;
+  expected_weekly_frequency: '1' | '2' | '3' | '4' | 'flexible';
+  schedule_mode: 'inherited' | 'custom' | 'flexible';
   status: StudentStatus;
   joined_at: string | null;
   notes: string | null;

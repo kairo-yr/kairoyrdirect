@@ -1,10 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { PageHeader } from '../components/ui/PageHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { getAcademyById, updateAcademy } from '../lib/academyApi';
 import { createAuditLog } from '../utils/superAdminActions';
 
 type AcademySettingsForm = {
@@ -28,13 +27,12 @@ export function AcademySettingsPage() {
         return;
       }
       setLoading(true);
-      const snapshot = await getDoc(doc(db, 'academies', academyId));
-      if (snapshot.exists()) {
-        const data = snapshot.data();
+      const data = await getAcademyById(academyId);
+      if (data) {
         setForm({
           name: String(data.name ?? ''),
           city: String(data.city ?? ''),
-          phone: String(data.phone ?? ''),
+          phone: String(data.primary_phone ?? ''),
         });
       }
       setLoading(false);
@@ -54,11 +52,10 @@ export function AcademySettingsPage() {
     setError('');
     setMessage('');
     try {
-      await updateDoc(doc(db, 'academies', academyId), {
+      await updateAcademy(academyId, {
         name: form.name.trim(),
         city: form.city.trim(),
-        phone: form.phone.trim(),
-        updatedAt: serverTimestamp(),
+        primary_phone: form.phone.trim(),
       });
       await createAuditLog({
         actor: userProfile,

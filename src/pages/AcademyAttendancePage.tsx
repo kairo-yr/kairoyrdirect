@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { CalendarCheck, ClipboardList, Eye, Plus, RotateCcw, Save, Search } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
@@ -12,8 +11,8 @@ import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrentCoach } from '../hooks/useCurrentCoach';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
-import { db } from '../lib/firebase';
 import { getAcademyWorkspace, getCoachWorkspace } from '../lib/coachWorkspaceApi';
+import { listAttendance, saveAttendance as saveAttendanceRecord } from '../lib/operationsApi';
 import {
   currentMonthValue,
   formatDateOnly,
@@ -22,7 +21,7 @@ import {
   monthDateRange,
   type StudentAttendanceSummary,
 } from '../lib/attendanceReportHistory';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { createAuditLog } from '../utils/superAdminActions';
 
 type AttendanceMode = 'academy' | 'coach';
@@ -137,12 +136,11 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
 
   const loadAttendance = async (currentBatches: BatchRecord[]) => {
     if (!academyId) return;
-    const attendanceSnapshot = isCoachMode && coachId
-      ? await getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', coachId)))
-      : await getDocs(collection(db, 'academies', academyId, 'attendance'));
+    const attendanceSnapshot = await listAttendance(academyId);
     const assignedBatchIds = new Set(currentBatches.map((batch) => batch.id));
-    const records = attendanceSnapshot.docs
-      .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
+    const records = attendanceSnapshot
+      .map((row) => row as unknown as AttendanceRecord)
+      .filter((record) => !isCoachMode || record.coachId === coachId)
       .filter((record) => !isCoachMode || record.coachId === coachId || assignedBatchIds.has(record.batchId))
       .sort((a, b) => b.date.localeCompare(a.date));
     setAttendanceRecords(records);
@@ -278,9 +276,6 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
     try {
       const counts = countAttendance(rows);
       const recordId = existingForSelection?.id;
-      const attendanceRef = recordId
-        ? doc(db, 'academies', academyId, 'attendance', recordId)
-        : doc(collection(db, 'academies', academyId, 'attendance'));
       const payload = {
         academyId,
         batchId: selectedBatch.id,
@@ -295,18 +290,13 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
         studentIds: rows.map((row) => row.studentId),
         students: rows,
         ...counts,
-        updatedAt: serverTimestamp(),
       };
-      if (recordId) {
-        await updateDoc(attendanceRef, payload);
-      } else {
-        await setDoc(attendanceRef, { ...payload, createdAt: serverTimestamp() });
-      }
+      const savedAttendance = await saveAttendanceRecord(payload, recordId);
       await createAuditLog({
         actor: userProfile,
         action: recordId ? 'academy.attendance.updated' : 'academy.attendance.created',
         targetType: 'attendance',
-        targetId: attendanceRef.id,
+        targetId: String(savedAttendance.id),
         academyId,
         message: `${selectedBatch.name} attendance ${recordId ? 'updated' : 'created'} for ${selectedDate}.`,
         metadata: {
@@ -340,13 +330,13 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
     setError('');
     try {
       const counts = countAttendance(editingRows);
-      await updateDoc(doc(db, 'academies', academyId, 'attendance', editingRecord.id), {
+      await saveAttendanceRecord({
+        ...editingRecord,
         studentIds: editingRows.map((row) => row.studentId),
         students: editingRows,
         status: editingStatus,
         ...counts,
-        updatedAt: serverTimestamp(),
-      });
+      }, editingRecord.id);
       await createAuditLog({
         actor: userProfile,
         action: 'academy.attendance.updated',
@@ -565,7 +555,7 @@ function AttendanceSystemPage({ mode }: { mode: AttendanceMode }) {
                 <td className="px-5 py-4 text-slate-600">{record.absentCount}</td>
                 <td className="px-5 py-4 text-slate-600">{record.totalCount}</td>
                 <td className="px-5 py-4 text-slate-600">{record.markedByName}</td>
-                <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(record.createdAt)}</td>
+                <td className="px-5 py-4 text-slate-600">{formatDateTime(record.createdAt)}</td>
                 <td className="px-5 py-4">
                   <button className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-directBlue" onClick={() => openEdit(record)} type="button">
                     View/Edit

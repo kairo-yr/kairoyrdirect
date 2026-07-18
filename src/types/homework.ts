@@ -12,6 +12,7 @@ export type HomeworkTask = {
 
 export type Homework = {
   id: string; academy_id: string; batch_id: string; class_report_id: string | null; created_by: string;
+  class_session_id?: string | null; recipient_mode?: 'batch' | 'present_late' | 'all_participants' | 'custom';
   created_by_role: string; title: string; instructions: string | null; parent_note: string | null;
   assigned_date: string; due_date: string; status: HomeworkStatus; public_code: string;
   published_at: string | null; cancelled_at: string | null; created_at: string; updated_at: string;
@@ -39,4 +40,5 @@ export type HomeworkDraftInput = {
   id?: string; academyId: string; batchId: string; classReportId?: string | null; title: string;
   instructions?: string | null; parentNote?: string | null; assignedDate: string; dueDate: string;
   tasks: Array<Omit<HomeworkTask, 'id' | 'homework_id'>>; excludedStudentIds: string[];
+  classSessionId?: string | null; recipientMode?: 'batch' | 'present_late' | 'all_participants' | 'custom';
 };

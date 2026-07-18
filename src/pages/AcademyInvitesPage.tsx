@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Copy, XCircle } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { listInvites } from '../lib/operationsApi';
 import type { AcademyInvite } from '../types/auth';
 import { statusStyles } from '../utils/badgeStyles';
 import { academyInviteLink, revokeAcademyInvite } from '../utils/academyAdmin';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 
 function inviteStatusClass(status: string) {
   if (status === 'pending') return statusStyles.pending;
@@ -32,8 +31,7 @@ export function AcademyInvitesPage() {
       return;
     }
     setLoading(true);
-    const snapshot = await getDocs(query(collection(db, 'academyInvites'), where('academyId', '==', academyId)));
-    setInvites(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyInvite));
+    setInvites(await listInvites(academyId) as AcademyInvite[]);
     setLoading(false);
   };
 
@@ -80,9 +78,9 @@ export function AcademyInvitesPage() {
               <td className="px-5 py-4 font-black text-navy">{invite.email}</td>
               <td className="px-5 py-4 text-slate-600">{invite.role}</td>
               <td className="px-5 py-4"><Badge className={inviteStatusClass(invite.status)}>{invite.status}</Badge></td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(invite.createdAt)}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(invite.expiresAt)}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(invite.acceptedAt)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(invite.createdAt)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(invite.expiresAt)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(invite.acceptedAt)}</td>
               <td className="max-w-[280px] truncate px-5 py-4 font-mono text-xs font-black text-directBlue">{academyInviteLink(invite.role, invite.inviteToken)}</td>
               <td className="px-5 py-4">
                 <div className="flex flex-wrap gap-2">

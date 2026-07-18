@@ -25,7 +25,7 @@ import {
 import { getCoachesByAcademy, type Coach } from '../lib/coachApi';
 import { getStudentsByAcademy, type Student } from '../lib/studentApi';
 import { statusStyles } from '../utils/badgeStyles';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 type BatchForm = {
@@ -282,7 +282,7 @@ export function AcademyBatchesPage() {
               <td className="px-5 py-4 text-slate-600">{batch.schedule_label || 'Not set'}</td>
               <td className="px-5 py-4 text-slate-600">{batch.student_count ?? 0}</td>
               <td className="px-5 py-4"><Badge className={statusClass(batch.status)}>{labelize(batch.status)}</Badge></td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(batch.created_at)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(batch.created_at)}</td>
               <td className="px-5 py-4">
                 <div className="flex flex-wrap gap-2">
                   <button className="rounded-xl border border-slate-200 p-2 text-slate-600" onClick={() => setViewing(batch)} type="button" aria-label="View batch" title="View batch"><Eye size={16} /></button>
@@ -356,7 +356,7 @@ export function AcademyBatchesPage() {
               ['Max students', viewing.max_students ? String(viewing.max_students) : 'Not set'],
               ['Students', String(viewing.student_count ?? 0)],
               ['Status', labelize(viewing.status)],
-              ['Created', formatFirestoreDate(viewing.created_at)],
+              ['Created', formatDateTime(viewing.created_at)],
             ].map(([label, value]) => (
               <div className="rounded-2xl bg-slate-50 p-3" key={label}>
                 <div className="text-xs font-black uppercase text-slate-500">{label}</div>

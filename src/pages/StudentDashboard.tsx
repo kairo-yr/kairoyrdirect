@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { BarChart3, BookOpen, CalendarCheck, ClipboardList, Gamepad2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatCard } from '../components/ui/StatCard';
 import { PLAY_APP_NAME } from '../config/brand';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { getAcademyWorkspace } from '../lib/coachWorkspaceApi';
+import { listMyHomework } from '../lib/homeworkApi';
+import { listAttendance, listClassReports, listProgressReports } from '../lib/operationsApi';
+import { getCurrentUserStudent } from '../lib/studentApi';
 import { RoleDashboard } from './RoleDashboard';
 
 type StudentProfile = {
@@ -78,31 +80,19 @@ export function StudentDashboard() {
       }
       setLoading(true);
       try {
-        const studentSnapshot = await getDoc(doc(db, 'academies', academyId, 'students', linkedStudentId));
-        const loadedStudent = studentSnapshot.exists() ? ({ id: studentSnapshot.id, ...studentSnapshot.data() } as StudentProfile) : null;
-        const [batchSnapshot, attendanceSnapshot, presentReportSnapshot, absentReportSnapshot, progressSnapshot, homeworkSnapshot] = await Promise.all([
-          getDocs(query(collection(db, 'academies', academyId, 'batches'), where('studentIds', 'array-contains', linkedStudentId))),
-          getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('studentIds', 'array-contains', linkedStudentId))),
-          getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsPresentIds', 'array-contains', linkedStudentId))),
-          getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsAbsentIds', 'array-contains', linkedStudentId))),
-          getDocs(query(collection(db, 'academies', academyId, 'progressReports'), where('studentId', '==', linkedStudentId))),
-          getDocs(query(collection(db, 'academies', academyId, 'homework'), where('studentIds', 'array-contains', linkedStudentId))),
-        ]);
-        const loadedBatches = batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord);
+        const [studentRow, workspace, attendanceSnapshot, reportRows, progressSnapshot, homeworkAssignments] = await Promise.all([getCurrentUserStudent(academyId), getAcademyWorkspace(academyId), listAttendance(academyId), listClassReports(academyId), listProgressReports(academyId), listMyHomework()]);
+        const loadedStudent = studentRow ? ({ id: studentRow.id, name: studentRow.full_name } as StudentProfile) : null;
+        const loadedBatches = workspace.batches.filter((batch) => batch.studentIds.includes(linkedStudentId));
         const assignedBatchIds = new Set(loadedBatches.map((batch) => batch.id));
-        const reportMap = new Map<string, ClassReportRecord>();
-        [...presentReportSnapshot.docs, ...absentReportSnapshot.docs].forEach((docSnap) => {
-          reportMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ClassReportRecord);
-        });
         setStudent(loadedStudent);
         setBatches(loadedBatches);
         setAttendanceRecords(
-          attendanceSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
+          attendanceSnapshot
+            .map((row) => row as AttendanceRecord)
             .filter((record) => [...(record.students ?? []), ...(record.entries ?? [])].some((entry) => entry.studentId === linkedStudentId)),
         );
         setClassReports(
-          Array.from(reportMap.values())
+          reportRows.map((row) => row as ClassReportRecord)
             .filter((report) =>
               report.studentsPresentIds?.includes(linkedStudentId)
               || report.studentsAbsentIds?.includes(linkedStudentId)
@@ -111,14 +101,13 @@ export function StudentDashboard() {
             .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))),
         );
         setProgressRecords(
-          progressSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressRecord)
+          progressSnapshot
+            .map((row) => row as ProgressRecord)
             .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))),
         );
         setHomeworkRecords(
-          homeworkSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as HomeworkRecord)
-            .filter((record) => record.status === 'active' && ((record.studentIds ?? []).includes(linkedStudentId) || Boolean(record.batchId && assignedBatchIds.has(record.batchId))))
+          homeworkAssignments.filter((assignment) => Boolean(assignment.homework)).map((assignment) => ({ id: assignment.homework!.id, title: assignment.homework!.title, dueDate: assignment.homework!.due_date, status: assignment.status, batchId: assignment.batch_id }) as HomeworkRecord)
+            .filter((record) => Boolean(record.batchId && assignedBatchIds.has(record.batchId)))
             .sort((a, b) => String(a.dueDate ?? '9999-12-31').localeCompare(String(b.dueDate ?? '9999-12-31'))),
         );
       } finally {

@@ -60,7 +60,7 @@
 - Register a new academy.
 - Confirm new academy remains pending until super admin approval.
 - Approve academy as super admin and verify owner becomes academy admin.
-- Create coach invite and accept with the invited email.
+- Add a coach, sign in with the same verified email, and confirm automatic account claiming without an invite.
 - Create student invite and accept with the invited email.
 - Confirm wrong email cannot accept an invite.
 - Confirm accepted invite cannot be reused.
@@ -76,8 +76,8 @@
 - Confirm coach views show assigned batch/student data only.
 - Confirm student views show linked student data only.
 
-## 7. Firestore Rules Tests
-- Deploy or emulate the current `firestore.rules`.
+## 7. Supabase RLS Tests
+- Apply all migrations to a disposable Supabase project and exercise each role with real JWTs.
 - Verify non-admin users cannot read global `users`, `academies`, or cross-academy records.
 - Verify students cannot write attendance, class reports, progress, fees, homework, batches, coaches, or academy records.
 - Verify homework delete is denied.
@@ -97,4 +97,4 @@
 - Parent/guardian may use the student account.
 - Kairoyr Play integration is placeholder/link-based.
 - Advanced subscription billing is not built.
-- Fine-grained Firestore rules may need Cloud Functions later for stronger security.
+- RLS and privileged RPCs must remain the server-side security boundary.

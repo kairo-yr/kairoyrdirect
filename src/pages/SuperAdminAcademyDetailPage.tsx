@@ -18,7 +18,7 @@ import {
 } from '../lib/academyApi';
 import { getBatchesByAcademy, type Batch } from '../lib/batchApi';
 import { getAcademyStatusClass } from '../utils/academyStatus';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 
 type AcademyCounts = {
   students: number;
@@ -126,8 +126,8 @@ export function SuperAdminAcademyDetailPage() {
             ['Owner name', academy.owner_name || 'Not available'],
             ['Owner email', academy.owner_email || 'Not available'],
             ['Status', academy.status],
-            ['Created', formatFirestoreDate(academy.created_at)],
-            ['Approved', formatFirestoreDate(academy.approved_at)],
+            ['Created', formatDateTime(academy.created_at)],
+            ['Approved', formatDateTime(academy.approved_at)],
             ['Approved by', academy.approved_by || 'Not available'],
             ['Notes', academy.notes || 'Not available'],
           ].map(([label, value]) => (

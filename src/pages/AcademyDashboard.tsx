@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 import { BookOpen, CalendarCheck, ClipboardList, FileText, KeyRound, School, UserPlus, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
@@ -11,10 +10,11 @@ import { getAcademyById, type Academy } from '../lib/academyApi';
 import { getBatchesByAcademy, type Batch } from '../lib/batchApi';
 import { getCoachesByAcademy, type Coach } from '../lib/coachApi';
 import { getStudentsByAcademy, type Student } from '../lib/studentApi';
-import { db } from '../lib/firebase';
+import { listManagedHomework } from '../lib/homeworkApi';
+import { listAttendance, listClassReports, listInvites, listProgressReports } from '../lib/operationsApi';
 import type { AcademyInvite } from '../types/auth';
 import { getAcademyStatusClass } from '../utils/academyStatus';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { RoleDashboard } from './RoleDashboard';
 
 type AttendanceRecord = { id: string; date?: string; status?: string };
@@ -55,21 +55,21 @@ export function AcademyDashboard() {
         getCoachesByAcademy(academyId),
         getStudentsByAcademy(academyId),
         getBatchesByAcademy(academyId),
-        getDocs(collection(db, 'academies', academyId, 'attendance')),
-        getDocs(collection(db, 'academies', academyId, 'classReports')),
-        getDocs(collection(db, 'academies', academyId, 'progressReports')),
-        getDocs(collection(db, 'academies', academyId, 'homework')),
-        getDocs(query(collection(db, 'academyInvites'), where('academyId', '==', academyId))),
+        listAttendance(academyId),
+        listClassReports(academyId),
+        listProgressReports(academyId),
+        listManagedHomework(),
+        listInvites(academyId),
       ]);
       setAcademy(loadedAcademy);
       setStudents(loadedStudents);
       setCoaches(loadedCoaches);
       setBatches(loadedBatches);
-      setAttendanceRecords(attendanceSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord));
-      setClassReports(reportSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ClassReportRecord));
-      setProgressRecords(progressSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ProgressRecord));
-      setHomeworkRecords(homeworkSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as HomeworkRecord));
-      setInvites(inviteSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyInvite));
+      setAttendanceRecords(attendanceSnapshot as AttendanceRecord[]);
+      setClassReports(reportSnapshot as ClassReportRecord[]);
+      setProgressRecords(progressSnapshot as ProgressRecord[]);
+      setHomeworkRecords(homeworkSnapshot as unknown as HomeworkRecord[]);
+      setInvites(inviteSnapshot as AcademyInvite[]);
       setLoading(false);
     };
 
@@ -175,7 +175,7 @@ export function AcademyDashboard() {
                   <td className="px-5 py-4 font-black text-navy">{student.full_name}</td>
                   <td className="px-5 py-4 text-slate-600">{student.email}</td>
                   <td className="px-5 py-4 text-slate-600">{student.status}</td>
-                  <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(student.created_at)}</td>
+                  <td className="px-5 py-4 text-slate-600">{formatDateTime(student.created_at)}</td>
                 </tr>
               ))}
             </DataTable>

@@ -17,7 +17,7 @@ import {
   type AcademyStatus,
 } from '../lib/academyApi';
 import { getAcademyStatusClass } from '../utils/academyStatus';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 type AcademyFilter = 'all' | AcademyStatus;
@@ -122,8 +122,8 @@ export function SuperAdminAcademiesPage() {
               <td className="px-5 py-4 text-slate-600">{academy.city || 'Not available'}</td>
               <td className="px-5 py-4 text-slate-600">{academy.primary_phone || 'Not available'}</td>
               <td className="px-5 py-4"><Badge className={getAcademyStatusClass(academy.status)}>{academy.status}</Badge></td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(academy.created_at)}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(academy.approved_at)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(academy.created_at)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(academy.approved_at)}</td>
               <td className="px-5 py-4">
                 <div className="flex flex-wrap gap-2">
                   <Link className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700" to={`/super-admin/academies/${academy.id}`}>

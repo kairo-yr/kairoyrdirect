@@ -14,7 +14,7 @@ export async function listMyHomework() {
 }
 
 export async function saveHomeworkDraft(input: HomeworkDraftInput, createdByRole: string) {
-  const payload = { academy_id: input.academyId, batch_id: input.batchId, class_report_id: input.classReportId || null, title: input.title.trim(), instructions: input.instructions?.trim() || null, parent_note: input.parentNote?.trim() || null, assigned_date: input.assignedDate, due_date: input.dueDate, created_by_role: createdByRole, excluded_student_ids: input.excludedStudentIds };
+  const payload = { academy_id: input.academyId, batch_id: input.batchId, class_report_id: input.classReportId || null, class_session_id: input.classSessionId || null, recipient_mode: input.recipientMode ?? 'batch', title: input.title.trim(), instructions: input.instructions?.trim() || null, parent_note: input.parentNote?.trim() || null, assigned_date: input.assignedDate, due_date: input.dueDate, created_by_role: createdByRole, excluded_student_ids: input.excludedStudentIds };
   let id = input.id;
   if (id) {
     const { error } = await supabase.from('homeworks').update(payload).eq('id', id).eq('status', 'draft'); if (error) throw error;

@@ -16,7 +16,7 @@ import {
   type CoachEmploymentType,
 } from '../../lib/coachApi';
 import { statusStyles } from '../../utils/badgeStyles';
-import { formatFirestoreDate } from '../../utils/firestoreFormat';
+import { formatDateTime } from '../../utils/dateFormat';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 
 type CoachForm = {
@@ -194,7 +194,7 @@ export function CoachManager({
             <tr className="border-t border-slate-100" key={coach.id}>
               <td className="px-5 py-4">
                 <div className="font-black text-navy">{coach.full_name}</div>
-                <div className="mt-1 text-xs font-semibold text-slate-500">{formatFirestoreDate(coach.created_at)}</div>
+                <div className="mt-1 text-xs font-semibold text-slate-500">{formatDateTime(coach.created_at)}</div>
               </td>
               <td className="px-5 py-4 text-slate-600">
                 <div>{coach.email || 'No email'}</div>
@@ -259,8 +259,8 @@ export function CoachManager({
               ['Specialization', viewing.specialization || 'Not added'],
               ['Employment type', statusLabel(viewing.employment_type || 'part_time')],
               ['Status', statusLabel(viewing.status)],
-              ['Joined', formatFirestoreDate(viewing.joined_at)],
-              ['Created', formatFirestoreDate(viewing.created_at)],
+              ['Joined', formatDateTime(viewing.joined_at)],
+              ['Created', formatDateTime(viewing.created_at)],
               ['Linked profile', viewing.user_id || 'Not linked'],
               ['Membership', viewing.membership_id || 'Not linked'],
               ['Notes', viewing.notes || 'Not added'],

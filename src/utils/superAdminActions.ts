@@ -1,5 +1,4 @@
-import { collection, doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabaseClient';
 import type { UserProfile } from '../types/auth';
 
 type AuditInput = {
@@ -13,17 +12,6 @@ type AuditInput = {
 };
 
 export async function createAuditLog({ actor, action, targetType, targetId, academyId = null, message, metadata = {} }: AuditInput) {
-  const logRef = doc(collection(db, 'auditLogs'));
-  await setDoc(logRef, {
-    actorUid: actor.uid,
-    actorEmail: actor.email,
-    actorRole: actor.role,
-    action,
-    targetType,
-    targetId,
-    academyId,
-    message,
-    metadata,
-    createdAt: serverTimestamp(),
-  });
+  const { error } = await supabase.from('audit_logs').insert({ actor_user_id: actor.id, academy_id: academyId, action, entity_type: targetType, entity_id: targetId || null, new_values: { message, ...metadata } });
+  if (error) throw error;
 }

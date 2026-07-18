@@ -43,7 +43,7 @@ export function SettingsPage() {
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           {[
             ['Academy approval mode', 'Manual approval'],
-            ['Invite system', 'Enabled'],
+            ['Student invite system', 'Enabled'],
             ['Kairoyr Play integration', 'Link placeholder in V1'],
             ['Subscription billing', 'Not built in V1'],
           ].map(([label, value]) => (

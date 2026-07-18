@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
 import { Search } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -7,10 +6,10 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { FormSelect } from '../components/ui/FormSelect';
 import { PageHeader } from '../components/ui/PageHeader';
-import { db } from '../lib/firebase';
+import { listInvites } from '../lib/operationsApi';
 import type { AcademyInvite, InviteStatus } from '../types/auth';
 import { statusStyles } from '../utils/badgeStyles';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 
 type InviteFilter = 'all' | InviteStatus;
 
@@ -30,8 +29,7 @@ export function SuperAdminInvitesPage() {
   useEffect(() => {
     const loadInvites = async () => {
       setLoading(true);
-      const snapshot = await getDocs(collection(db, 'academyInvites'));
-      setInvites(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyInvite));
+      setInvites(await listInvites() as AcademyInvite[]);
       setLoading(false);
     };
 
@@ -78,9 +76,9 @@ export function SuperAdminInvitesPage() {
               <td className="px-5 py-4"><Badge className={inviteStatusClass(invite.status)}>{invite.status}</Badge></td>
               <td className="px-5 py-4 text-slate-600">{invite.academyId}</td>
               <td className="px-5 py-4 text-slate-600">{invite.linkedProfileId}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(invite.createdAt)}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(invite.expiresAt)}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(invite.acceptedAt)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(invite.createdAt)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(invite.expiresAt)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(invite.acceptedAt)}</td>
               <td className="px-5 py-4 text-slate-600">{invite.acceptedByUid || 'Not accepted'}</td>
             </tr>
           ))}

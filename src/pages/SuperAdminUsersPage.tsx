@@ -12,7 +12,7 @@ import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import { getApplicationUsers, setApplicationUserStatus } from '../lib/userApi';
 import type { Role, UserProfile, UserStatus } from '../types/auth';
 import { statusStyles } from '../utils/badgeStyles';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 
 type RoleFilter = 'all' | Role;
 type StatusFilter = 'all' | UserStatus;
@@ -125,8 +125,8 @@ export function SuperAdminUsersPage() {
                 <td className="px-5 py-4"><Badge className={user.status === 'active' ? statusStyles.active : user.status === 'pending' ? statusStyles.pending : statusStyles.inactive}>{user.status}</Badge></td>
                 <td className="px-5 py-4 text-slate-600">{user.academyId || 'Not assigned'}</td>
                 <td className="px-5 py-4 text-xs text-slate-600">S:{user.linkedStudentId || '-'} P:{user.linkedParentId || '-'}</td>
-                <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(user.createdAt)}</td>
-                <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(user.lastLoginAt)}</td>
+                <td className="px-5 py-4 text-slate-600">{formatDateTime(user.createdAt)}</td>
+                <td className="px-5 py-4 text-slate-600">{formatDateTime(user.lastLoginAt)}</td>
                 <td className="px-5 py-4">
                   {protectedLabel ? (
                     <span className="text-sm font-black text-slate-500">{protectedLabel}</span>

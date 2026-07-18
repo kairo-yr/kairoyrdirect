@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { PageHeader } from '../components/ui/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { getAcademyWorkspace } from '../lib/coachWorkspaceApi';
 import { supabase } from '../lib/supabaseClient';
+import { getCurrentUserStudent, updateStudent } from '../lib/studentApi';
 
 type StudentProfile = {
   id: string;
@@ -48,13 +48,10 @@ export function StudentProfileSettingsPage() {
       setLoading(true);
       setError('');
       try {
-        const [studentSnapshot, batchSnapshot] = await Promise.all([
-          getDoc(doc(db, 'academies', academyId, 'students', linkedStudentId)),
-          getDocs(query(collection(db, 'academies', academyId, 'batches'), where('studentIds', 'array-contains', linkedStudentId))),
-        ]);
-        const loadedStudent = studentSnapshot.exists() ? ({ id: studentSnapshot.id, ...studentSnapshot.data() } as StudentProfile) : null;
+        const [studentRow, workspace] = await Promise.all([getCurrentUserStudent(academyId), getAcademyWorkspace(academyId)]);
+        const loadedStudent = studentRow ? ({ id: studentRow.id, name: studentRow.full_name, email: studentRow.email, phone: studentRow.phone, parentName: studentRow.parent_name, parentPhone: studentRow.parent_phone, parentEmail: studentRow.parent_email, status: studentRow.status } as StudentProfile) : null;
         setStudent(loadedStudent);
-        setBatches(batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord));
+        setBatches(workspace.batches.filter((batch) => batch.studentIds.includes(linkedStudentId)));
         setForm({
           name: loadedStudent?.name || userProfile?.name || '',
           phone: loadedStudent?.phone || '',
@@ -89,24 +86,17 @@ export function StudentProfileSettingsPage() {
     setError('');
     setMessage('');
     try {
-      await updateDoc(doc(db, 'academies', academyId, 'students', linkedStudentId), {
-        name: form.name.trim(),
+      await updateStudent(linkedStudentId, {
+        full_name: form.name.trim(),
         phone: form.phone.trim(),
-        guardianName: form.guardianName.trim(),
-        guardianPhone: form.guardianPhone.trim(),
-        guardianEmail: form.guardianEmail.trim().toLowerCase(),
-        parentName: form.guardianName.trim(),
-        parentPhone: form.guardianPhone.trim(),
-        parentEmail: form.guardianEmail.trim().toLowerCase(),
-        updatedAt: serverTimestamp(),
+        parent_name: form.guardianName.trim(),
+        parent_phone: form.guardianPhone.trim(),
+        parent_email: form.guardianEmail.trim().toLowerCase(),
       });
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          full_name: form.name.trim(),
-          phone: form.phone.trim() || null,
-        })
-        .eq('id', userProfile.uid);
+      const { error: profileError } = await supabase.rpc('update_my_profile', {
+        profile_name: form.name.trim(),
+        profile_phone: form.phone.trim() || null,
+      });
       if (profileError) throw profileError;
       await refreshUserProfile();
       setStudent((current) => current ? {

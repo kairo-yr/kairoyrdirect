@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { CheckCircle2, Eye, IndianRupee, ReceiptText, RefreshCw } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -10,7 +9,9 @@ import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
+import { getAcademyWorkspace } from '../lib/coachWorkspaceApi';
+import { listFees, saveFee } from '../lib/operationsApi';
+import { getStudentsByAcademy } from '../lib/studentApi';
 import type { AcademyStudentProfile } from '../types/auth';
 import { createAuditLog } from '../utils/superAdminActions';
 
@@ -115,14 +116,10 @@ export function AcademyFeesPage() {
     }
     setLoading(true);
     try {
-      const [studentSnapshot, batchSnapshot, feeSnapshot] = await Promise.all([
-        getDocs(collection(db, 'academies', academyId, 'students')),
-        getDocs(collection(db, 'academies', academyId, 'batches')),
-        getDocs(collection(db, 'academies', academyId, 'fees')),
-      ]);
-      setStudents(studentSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AcademyStudentProfile));
-      setBatches(batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord));
-      setFees(feeSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as FeeRecord));
+      const [studentRows, workspace, feeRows] = await Promise.all([getStudentsByAcademy(academyId), getAcademyWorkspace(academyId), listFees(academyId)]);
+      setStudents(studentRows.map((student) => ({ id: student.id, name: student.full_name, email: student.email ?? '', phone: student.phone ?? '', parentName: student.parent_name ?? '', parentEmail: student.parent_email ?? '', parentPhone: student.parent_phone ?? '', status: student.status === 'pending_login' ? 'invited' : student.status as AcademyStudentProfile['status'], userUid: student.user_id, createdAt: student.created_at, updatedAt: student.updated_at })));
+      setBatches(workspace.batches);
+      setFees(feeRows.map((row) => row as unknown as FeeRecord));
     } finally {
       setLoading(false);
     }
@@ -185,8 +182,7 @@ export function AcademyFeesPage() {
           continue;
         }
         const batch = getStudentBatch(student.id, batches);
-        const feeRef = doc(collection(db, 'academies', academyId, 'fees'));
-        await setDoc(feeRef, {
+        const savedFee = await saveFee({
           academyId,
           studentId: student.id,
           studentName: student.name,
@@ -200,17 +196,15 @@ export function AcademyFeesPage() {
           paidDate: null,
           paymentMode: null,
           note: '',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
         });
         await createAuditLog({
           actor: userProfile,
           action: 'academy.fee.generated',
           targetType: 'fee',
-          targetId: feeRef.id,
+          targetId: String(savedFee.id),
           academyId,
           message: `${student.name} fee generated for ${selectedMonth}.`,
-          metadata: { academyId, studentId: student.id, feeId: feeRef.id, month: selectedMonth, amount: monthlyFee, paidAmount: 0 },
+          metadata: { academyId, studentId: student.id, feeId: savedFee.id, month: selectedMonth, amount: monthlyFee, paidAmount: 0 },
         });
         created += 1;
       }
@@ -228,10 +222,10 @@ export function AcademyFeesPage() {
     setSaving(true);
     setError('');
     try {
-      await updateDoc(doc(db, 'academies', academyId, 'fees', record.id), {
+      await saveFee({
+        ...record,
         ...fields,
-        updatedAt: serverTimestamp(),
-      });
+      }, record.id);
       await createAuditLog({
         actor: userProfile,
         action,
@@ -513,10 +507,11 @@ export function StudentFeesPage() {
       setLoading(true);
       setError('');
       try {
-        const feeSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'fees'), where('studentId', '==', linkedStudentId)));
+        const feeSnapshot = await listFees(academyId);
         setFees(
-          feeSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as FeeRecord)
+          feeSnapshot
+            .map((row) => row as unknown as FeeRecord)
+            .filter((fee) => fee.studentId === linkedStudentId)
             .sort((a, b) => String(b.month ?? '').localeCompare(String(a.month ?? ''))),
         );
       } catch (caught) {

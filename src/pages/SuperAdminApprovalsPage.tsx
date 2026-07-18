@@ -4,7 +4,7 @@ import { DataTable } from '../components/ui/DataTable';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PageHeader } from '../components/ui/PageHeader';
 import { approveAcademy, getAcademies, rejectAcademy, type Academy } from '../lib/academyApi';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 export function SuperAdminApprovalsPage() {
@@ -67,7 +67,7 @@ export function SuperAdminApprovalsPage() {
               <td className="px-5 py-4 text-slate-600">{academy.owner_email || 'Not available'}</td>
               <td className="px-5 py-4 text-slate-600">{academy.city || 'Not available'}</td>
               <td className="px-5 py-4 text-slate-600">{academy.primary_phone || 'Not available'}</td>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(academy.created_at)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(academy.created_at)}</td>
               <td className="px-5 py-4">
                 <div className="flex flex-wrap gap-2">
                   <button className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white" onClick={() => runAction(() => approveAcademy(academy.id).then(() => undefined), `${academy.name} approved.`)} type="button">

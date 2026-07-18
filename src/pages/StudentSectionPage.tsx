@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 import { BookOpen, CalendarCheck, FileText } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
@@ -8,8 +7,9 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { StatCard } from '../components/ui/StatCard';
 import { PLAY_APP_NAME } from '../config/brand';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/firebase';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { getAcademyWorkspace } from '../lib/coachWorkspaceApi';
+import { listAttendance, listClassReports } from '../lib/operationsApi';
+import { formatDateTime } from '../utils/dateFormat';
 
 type StudentSection = 'attendance' | 'classReports' | 'homework';
 
@@ -87,10 +87,10 @@ function StudentAttendancePage() {
       setLoading(true);
       setError('');
       try {
-        const snapshot = await getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('studentIds', 'array-contains', linkedStudentId)));
+        const snapshot = await listAttendance(academyId);
         setRecords(
-          snapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
+          snapshot
+            .map((row) => row as AttendanceRecord)
             .filter((record) => Boolean(getStudentAttendanceEntry(record, linkedStudentId)))
             .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? ''))),
         );
@@ -145,7 +145,7 @@ function StudentAttendancePage() {
                 <td className="px-5 py-4"><Badge className={statusClass(entry?.status)}>{entry?.status || 'Not marked'}</Badge></td>
                 <td className="px-5 py-4 text-slate-600">{entry?.note || 'No note'}</td>
                 <td className="px-5 py-4 text-slate-600">{record.markedByName || 'Not available'}</td>
-                <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(record.createdAt)}</td>
+                <td className="px-5 py-4 text-slate-600">{formatDateTime(record.createdAt)}</td>
               </tr>
             );
           })}
@@ -173,24 +173,10 @@ function StudentClassReportsPage() {
       setLoading(true);
       setError('');
       try {
-        const batchSnapshot = await getDocs(query(collection(db, 'academies', academyId, 'batches'), where('studentIds', 'array-contains', linkedStudentId)));
-        const assignedBatches = batchSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as BatchRecord);
+        const [workspace, reportRows] = await Promise.all([getAcademyWorkspace(academyId), listClassReports(academyId)]);
+        const assignedBatches = workspace.batches.filter((batch) => batch.studentIds.includes(linkedStudentId));
         const assignedBatchIds = assignedBatches.map((batch) => batch.id);
-        const reportMap = new Map<string, ClassReportRecord>();
-        const [presentSnapshot, absentSnapshot] = await Promise.all([
-          getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsPresentIds', 'array-contains', linkedStudentId))),
-          getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('studentsAbsentIds', 'array-contains', linkedStudentId))),
-        ]);
-        [...presentSnapshot.docs, ...absentSnapshot.docs].forEach((docSnap) => {
-          reportMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ClassReportRecord);
-        });
-        for (const batchId of assignedBatchIds.slice(0, 10)) {
-          const batchReports = await getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('batchId', '==', batchId)));
-          batchReports.docs.forEach((docSnap) => {
-            reportMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as ClassReportRecord);
-          });
-        }
-        const relatedReports = Array.from(reportMap.values())
+        const relatedReports = reportRows.map((row) => row as ClassReportRecord)
           .filter((report) =>
             report.studentsPresentIds?.includes(linkedStudentId)
             || report.studentsAbsentIds?.includes(linkedStudentId)

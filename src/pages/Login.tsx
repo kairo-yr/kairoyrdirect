@@ -47,7 +47,7 @@ export function Login() {
           {submitting ? 'Connecting...' : 'Continue with Google'}
         </button>
         <p className="mt-4 text-xs leading-5 text-slate-500">
-          New users are created as unassigned until an academy registration is approved or an invite is accepted.
+          New users remain unassigned until an academy registration is approved, a registered coach email is matched, or a student invite is accepted.
         </p>
       </div>
     </main>

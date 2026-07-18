@@ -34,7 +34,7 @@ export function RoleDashboard({ title, description, role }: { title: string; des
           </div>
         </div>
         <p className="mt-5 text-xs leading-5 text-slate-500">
-          TODO: Frontend route checks are only a usability layer. Production Firestore security rules must enforce role and academy access on the server side.
+          Route checks improve navigation; Supabase row-level security remains the authorization boundary.
         </p>
       </section>
     </div>

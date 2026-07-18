@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { BookOpen, Check, Copy, Edit, Eye, FileText, Plus, RotateCcw, Save } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
@@ -11,11 +10,12 @@ import { StatCard } from '../components/ui/StatCard';
 import { useAuth } from '../contexts/AuthContext';
 import { useCurrentCoach } from '../hooks/useCurrentCoach';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
-import { db } from '../lib/firebase';
 import { getAcademyWorkspace, getCoachWorkspace } from '../lib/coachWorkspaceApi';
+import { listAttendance, listClassReports, saveClassReport } from '../lib/operationsApi';
 import { currentMonthValue, formatDateOnly, groupReportsByBatch, monthDateRange } from '../lib/attendanceReportHistory';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { createAuditLog } from '../utils/superAdminActions';
+import { getClassSession } from '../lib/classSessionApi';
 import { findHomeworkLink, generateClassReportWhatsAppMessage } from '../utils/classReportWhatsApp';
 
 type ReportMode = 'academy' | 'coach';
@@ -77,6 +77,7 @@ type ClassReportRecord = {
   updatedByName: string | null;
   createdAt: unknown;
   updatedAt: unknown;
+  classSessionId?: string | null;
 };
 
 type ReportForm = {
@@ -168,18 +169,17 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
 
   const selectedBatch = batches.find((batch) => batch.id === selectedBatchId);
   const matchingAttendance = attendanceRecords.find((record) => record.batchId === selectedBatchId && record.date === selectedDate);
-  const existingReport = reports.find((report) => report.batchId === selectedBatchId && report.date === selectedDate);
+  const requestedSessionId = searchParams.get('sessionId');
+  const existingReport = reports.find((report) => requestedSessionId ? report.classSessionId === requestedSessionId : report.batchId === selectedBatchId && report.date === selectedDate);
   const studentsPresentIds = matchingAttendance?.students?.filter((student) => student.status === 'present').map((student) => student.studentId) ?? [];
   const studentsAbsentIds = matchingAttendance?.students?.filter((student) => student.status === 'absent').map((student) => student.studentId) ?? [];
 
   const loadReports = async (currentBatches: BatchRecord[]) => {
     if (!academyId) return;
-    const reportSnapshot = isCoachMode && coachId
-      ? await getDocs(query(collection(db, 'academies', academyId, 'classReports'), where('coachId', '==', coachId)))
-      : await getDocs(collection(db, 'academies', academyId, 'classReports'));
+    const reportSnapshot = await listClassReports(academyId);
     const assignedBatchIds = new Set(currentBatches.map((batch) => batch.id));
-    const loadedReports = reportSnapshot.docs
-      .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as ClassReportRecord)
+    const loadedReports = reportSnapshot
+      .map((row) => row as unknown as ClassReportRecord)
       .filter((report) => !isCoachMode || report.coachId === coachId || assignedBatchIds.has(report.batchId))
       .sort((a, b) => b.date.localeCompare(a.date));
     setReports(loadedReports);
@@ -194,9 +194,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
       setLoading(true);
       setLoadError('');
       try {
-        const attendanceSnapshot = isCoachMode && coachId
-          ? await getDocs(query(collection(db, 'academies', academyId, 'attendance'), where('coachId', '==', coachId)))
-          : await getDocs(collection(db, 'academies', academyId, 'attendance'));
+        const attendanceSnapshot = await listAttendance(academyId);
         let loadedBatches: BatchRecord[];
         let loadedStudents: Map<string, StudentRecord>;
         if (isCoachMode && coachId) {
@@ -208,18 +206,33 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
           loadedBatches = workspace.batches;
           loadedStudents = new Map(workspace.students.map((student) => [student.id, student]));
         }
-        setBatches(loadedBatches);
+        const requestedSessionId = searchParams.get('sessionId');
+        const requestedSession = requestedSessionId ? await getClassSession(requestedSessionId) : null;
+        let effectiveBatches = loadedBatches;
+        let effectiveAttendance = attendanceSnapshot.map((row) => row as unknown as AttendanceRecord);
+        if (requestedSession) {
+          const rosterIds = (requestedSession.session_participants ?? []).map((participant) => participant.student_id);
+          const sourceBatchId = searchParams.get('batchId') || requestedSession.session_source_batches?.[0]?.batch_id || '';
+          effectiveBatches = loadedBatches.map((batch) => batch.id === sourceBatchId ? { ...batch, studentIds: Array.from(new Set([...batch.studentIds, ...rosterIds])) } : batch);
+          requestedSession.session_participants?.forEach((participant) => {
+            if (participant.student) loadedStudents.set(participant.student_id, { id: participant.student_id, name: participant.student.full_name, status: 'active' });
+          });
+          effectiveAttendance = [{ id: `session:${requestedSession.id}`, academyId, batchId: sourceBatchId, batchName: requestedSession.session_source_batches?.[0]?.batch?.name ?? 'Mixed class', coachId: requestedSession.coach_id, coachName: requestedSession.coach?.full_name ?? null, date: requestedSession.session_date, status: requestedSession.status === 'completed' ? 'submitted' : 'draft', students: (requestedSession.session_participants ?? []).map((participant) => ({ studentId: participant.student_id, studentName: participant.student?.full_name ?? 'Student', status: ['present','late'].includes(participant.attendance_status) ? 'present' : 'absent', note: participant.attendance_note ?? '' })) } as AttendanceRecord, ...effectiveAttendance];
+          setSelectedDate(requestedSession.session_date);
+          setCreateReportOpen(true);
+        }
+        setBatches(effectiveBatches);
         setStudentsById(loadedStudents);
         setAttendanceRecords(
-          attendanceSnapshot.docs
-            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }) as AttendanceRecord)
-            .filter((record) => !isCoachMode || loadedBatches.some((batch) => batch.id === record.batchId)),
+          effectiveAttendance
+            .map((row) => row as unknown as AttendanceRecord)
+            .filter((record) => !isCoachMode || effectiveBatches.some((batch) => batch.id === record.batchId)),
         );
         const requestedBatchId = searchParams.get('batchId') ?? '';
-        const initialBatchId = loadedBatches.some((batch) => batch.id === requestedBatchId) ? requestedBatchId : loadedBatches[0]?.id ?? '';
-        setSelectedBatchId((current) => loadedBatches.some((batch) => batch.id === current) ? current : initialBatchId);
-        setFilterBatchId((current) => loadedBatches.some((batch) => batch.id === current) ? current : requestedBatchId);
-        await loadReports(loadedBatches);
+        const initialBatchId = effectiveBatches.some((batch) => batch.id === requestedBatchId) ? requestedBatchId : effectiveBatches[0]?.id ?? '';
+        setSelectedBatchId((current) => effectiveBatches.some((batch) => batch.id === current) ? current : initialBatchId);
+        setFilterBatchId((current) => effectiveBatches.some((batch) => batch.id === current) ? current : requestedBatchId);
+        await loadReports(effectiveBatches);
       } catch (caught) {
         setLoadError(caught instanceof Error ? caught.message : 'Could not load class report history.');
       } finally {
@@ -334,9 +347,6 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
     setError('');
     try {
       const reportId = existingReport?.id;
-      const reportRef = reportId
-        ? doc(db, 'academies', academyId, 'classReports', reportId)
-        : doc(collection(db, 'academies', academyId, 'classReports'));
       const payload = {
         academyId,
         batchId: selectedBatch.id,
@@ -345,6 +355,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
         coachName: selectedBatch.coachName ?? null,
         date: selectedDate,
         attendanceId: matchingAttendance?.id ?? null,
+        classSessionId: requestedSessionId,
         title: form.title.trim(),
         topicCovered: form.topicCovered.trim(),
         classSummary: form.classSummary.trim(),
@@ -357,29 +368,23 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
         status: nextStatus,
         updatedByUid: reportId ? userProfile.uid : null,
         updatedByName: reportId ? userProfile.name : null,
-        updatedAt: serverTimestamp(),
       };
-      if (reportId) {
-        await updateDoc(reportRef, payload);
-      } else {
-        await setDoc(reportRef, {
+      const savedReport = await saveClassReport({
           ...payload,
           createdByUid: userProfile.uid,
           createdByName: userProfile.name,
           createdByRole: isCoachMode ? 'coach' : 'academy_admin',
-          createdAt: serverTimestamp(),
-        });
-      }
+      }, reportId);
       const action = nextStatus === 'submitted' ? 'academy.classReport.submitted' : reportId ? 'academy.classReport.updated' : 'academy.classReport.created';
       await createAuditLog({
         actor: userProfile,
         action,
         targetType: 'classReport',
-        targetId: reportRef.id,
+        targetId: String(savedReport.id),
         academyId,
         message: `${selectedBatch.name} class report ${reportId ? 'updated' : 'created'} for ${selectedDate}.`,
         metadata: {
-          reportId: reportRef.id,
+          reportId: savedReport.id,
           batchId: selectedBatch.id,
           date: selectedDate,
           createdByUid: reportId ? existingReport?.createdByUid : userProfile.uid,
@@ -407,7 +412,8 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
     setSaving(true);
     setError('');
     try {
-      await updateDoc(doc(db, 'academies', academyId, 'classReports', editReport.id), {
+      await saveClassReport({
+        ...editReport,
         title: editForm.title.trim(),
         topicCovered: editForm.topicCovered.trim(),
         classSummary: editForm.classSummary.trim(),
@@ -418,8 +424,7 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
         status: editStatus,
         updatedByUid: userProfile.uid,
         updatedByName: userProfile.name,
-        updatedAt: serverTimestamp(),
-      });
+      }, editReport.id);
       await createAuditLog({
         actor: userProfile,
         action: editStatus === 'submitted' ? 'academy.classReport.submitted' : 'academy.classReport.updated',
@@ -681,8 +686,8 @@ function ClassReportsSystemPage({ mode }: { mode: ReportMode }) {
               <div><span className="font-black text-navy">Coach:</span> {viewReport.coachName ?? 'Not assigned'}</div>
               <div><span className="font-black text-navy">Status:</span> {viewReport.status}</div>
               <div><span className="font-black text-navy">Created by:</span> {viewReport.createdByName}</div>
-              <div><span className="font-black text-navy">Created:</span> {formatFirestoreDate(viewReport.createdAt)}</div>
-              <div><span className="font-black text-navy">Updated:</span> {formatFirestoreDate(viewReport.updatedAt)}</div>
+              <div><span className="font-black text-navy">Created:</span> {formatDateTime(viewReport.createdAt)}</div>
+              <div><span className="font-black text-navy">Updated:</span> {formatDateTime(viewReport.updatedAt)}</div>
             </div>
             <button
               className="inline-flex items-center gap-2 rounded-xl bg-directBlue px-4 py-2.5 font-black text-white"

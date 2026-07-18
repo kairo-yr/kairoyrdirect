@@ -1,11 +1,9 @@
 import { useState, type FormEvent } from 'react';
-import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { KeyRound } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BrandMark } from '../components/ui/BrandMark';
 import { FormInput } from '../components/ui/FormInput';
-import { db } from '../lib/firebase';
-import type { AcademyInvite } from '../types/auth';
+import { findInviteByToken } from '../lib/operationsApi';
 
 function extractInvite(value: string) {
   const trimmed = value.trim();
@@ -45,13 +43,11 @@ export function JoinInviteLookup() {
         return;
       }
 
-      const inviteQuery = query(collection(db, 'academyInvites'), where('inviteToken', '==', extracted.token), limit(1));
-      const inviteSnapshot = await getDocs(inviteQuery);
-      if (inviteSnapshot.empty) {
+      const invite = await findInviteByToken(extracted.token);
+      if (!invite) {
         setError('No invite was found for that token.');
         return;
       }
-      const invite = { id: inviteSnapshot.docs[0].id, ...inviteSnapshot.docs[0].data() } as AcademyInvite;
       navigate(`/join/${invite.role}/${invite.inviteToken}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not open that invite.');

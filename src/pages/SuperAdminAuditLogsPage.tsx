@@ -5,7 +5,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { FormInput } from '../components/ui/FormInput';
 import { PageHeader } from '../components/ui/PageHeader';
 import { getAuditLogs, type AuditLog } from '../lib/academyApi';
-import { formatFirestoreDate } from '../utils/firestoreFormat';
+import { formatDateTime } from '../utils/dateFormat';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 
 export function SuperAdminAuditLogsPage() {
@@ -60,7 +60,7 @@ export function SuperAdminAuditLogsPage() {
         <DataTable columns={['Created', 'Actor', 'Role', 'Action', 'Target Type', 'Target']}>
           {filteredLogs.map((log) => (
             <tr className="border-t border-slate-100" key={log.id}>
-              <td className="px-5 py-4 text-slate-600">{formatFirestoreDate(log.created_at)}</td>
+              <td className="px-5 py-4 text-slate-600">{formatDateTime(log.created_at)}</td>
               <td className="px-5 py-4 text-slate-600">{log.actor?.email || log.actor_user_id || 'Not available'}</td>
               <td className="px-5 py-4 text-slate-600">{log.actor?.platform_role === 'super_admin' ? 'super_admin' : log.actor?.app_role || 'Not available'}</td>
               <td className="px-5 py-4 font-black text-navy">{log.action || 'Not available'}</td>

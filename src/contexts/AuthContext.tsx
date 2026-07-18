@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
-import type { AcademyInvite, AcademyRegistration, AuthUser, InvitableRole, Role, UserProfile, UserStatus } from '../types/auth';
+import type { AcademyInvite, AcademyRegistration, AuthUser, Role, UserProfile, UserStatus } from '../types/auth';
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -154,21 +154,7 @@ async function getOrCreateUserProfile(user: AuthUser) {
     return normalizeProfile(claimedProfile ?? existingProfile, user);
   }
 
-  const newProfile = {
-    id: user.id,
-    email: (user.email ?? '').toLowerCase(),
-    full_name: user.user_metadata?.full_name ?? null,
-    avatar_url: user.user_metadata?.avatar_url ?? null,
-    platform_role: 'user',
-    app_role: 'user',
-    status: 'active',
-  };
-
-  const { data: createdProfile, error: insertError } = await supabase
-    .from('profiles')
-    .insert(newProfile)
-    .select('*')
-    .single<ProfileRow>();
+  const { data: createdProfile, error: insertError } = await supabase.rpc('ensure_my_profile');
 
   if (insertError) throw insertError;
   await claimVerifiedCoachAccount(user);
@@ -180,7 +166,7 @@ async function getOrCreateUserProfile(user: AuthUser) {
     .eq('id', user.id)
     .maybeSingle<ProfileRow>();
   if (claimedFetchError) throw claimedFetchError;
-  return normalizeProfile(claimedProfile ?? createdProfile, user);
+  return normalizeProfile(claimedProfile ?? createdProfile as ProfileRow, user);
 }
 
 async function claimVerifiedCoachAccount(user: AuthUser) {
@@ -256,66 +242,14 @@ async function claimVerifiedCoachAccount(user: AuthUser) {
   return (persistedCoaches ?? []) as ClaimedCoachRow[];
 }
 
-async function updateProfileRole(
-  userId: string,
-  input: {
-    app_role: Role;
-    status?: UserStatus;
-    linked_student_id?: string | null;
-    linked_parent_id?: string | null;
-  },
-) {
-  const { error } = await supabase
-    .from('profiles')
-    .update({
-      app_role: input.app_role,
-      status: input.status ?? 'active',
-      linked_student_id: input.linked_student_id ?? null,
-      linked_parent_id: input.linked_parent_id ?? null,
-    })
-    .eq('id', userId);
-
-  if (error) throw error;
-}
-
-function makeInviteToken() {
-  return Math.random().toString(36).slice(2, 12);
-}
-
 export function isInviteExpired(expiresAt: unknown) {
   if (!expiresAt) return false;
   if (typeof expiresAt === 'object' && 'toDate' in expiresAt && typeof expiresAt.toDate === 'function') {
     return expiresAt.toDate().getTime() < Date.now();
   }
   if (expiresAt instanceof Date) return expiresAt.getTime() < Date.now();
-  return false;
-}
-
-async function loadFirestoreDataLayer() {
-  const firestore = await import('firebase/firestore');
-  const { db } = await import('../lib/firebase');
-  return { ...firestore, db };
-}
-
-async function createInvite(input: { academyId: string; role: InvitableRole; email: string; linkedProfileId: string; createdByUid: string }) {
-  const { collection, db, doc, serverTimestamp, setDoc, Timestamp } = await loadFirestoreDataLayer();
-  const inviteRef = doc(collection(db, 'academyInvites'));
-  const inviteToken = makeInviteToken();
-  // TODO: Store inviteToken hash instead of raw token before production.
-  await setDoc(inviteRef, {
-    academyId: input.academyId,
-    role: input.role,
-    email: input.email.toLowerCase(),
-    linkedProfileId: input.linkedProfileId,
-    inviteToken,
-    status: 'pending',
-    createdByUid: input.createdByUid,
-    createdAt: serverTimestamp(),
-    expiresAt: Timestamp.fromDate(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)),
-    acceptedByUid: null,
-    acceptedAt: null,
-  });
-  return { inviteId: inviteRef.id, inviteToken };
+  const parsed = new Date(String(expiresAt));
+  return !Number.isNaN(parsed.getTime()) && parsed.getTime() < Date.now();
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -477,55 +411,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, userProfile?.academyId]);
 
   const revokeInvite = useCallback(async (inviteId: string) => {
-    const { db, doc, updateDoc } = await loadFirestoreDataLayer();
-    await updateDoc(doc(db, 'academyInvites', inviteId), { status: 'revoked' });
+    const { revokeInviteRecord } = await import('../lib/operationsApi');
+    await revokeInviteRecord(inviteId);
   }, []);
 
   const acceptInvite = useCallback(async (invite: AcademyInvite) => {
     if (!user) throw new Error('You must sign in to accept this invite.');
-    if (invite.role === 'coach') {
-      throw new Error('Coach access is now linked automatically by Google email. Ask the coach to log in with the pre-authorized email.');
-    }
     const signedInEmail = (user.email ?? '').toLowerCase();
     if (signedInEmail !== invite.email.toLowerCase()) {
       throw new Error(`This invite was sent to ${invite.email}. Please sign in with that Google account.`);
     }
     if (invite.status !== 'pending') throw new Error('This invite is no longer pending.');
     if (isInviteExpired(invite.expiresAt)) throw new Error('This invite has expired.');
-    const { db, doc, serverTimestamp, updateDoc } = await loadFirestoreDataLayer();
-
-    await updateProfileRole(user.id, {
-      app_role: invite.role,
-      status: 'active',
-      linked_student_id: invite.linkedProfileId,
-      linked_parent_id: null,
-    });
-    await updateDoc(doc(db, 'academies', invite.academyId, 'students', invite.linkedProfileId), {
-      status: 'active',
-      userUid: user.id,
-      updatedAt: serverTimestamp(),
-    });
-    await updateDoc(doc(db, 'academyInvites', invite.id), {
-      status: 'accepted',
-      acceptedByUid: user.id,
-      acceptedAt: serverTimestamp(),
-    });
-    if (userProfile) {
-      const { createAuditLog } = await import('../utils/superAdminActions');
-      await createAuditLog({
-        actor: userProfile,
-        action: 'invite.accepted',
-        targetType: 'academyInvite',
-        targetId: invite.id,
-        academyId: invite.academyId,
-        message: `${signedInEmail} accepted ${invite.role} invite.`,
-        metadata: { role: invite.role, linkedProfileId: invite.linkedProfileId },
-      });
-    }
+    const { acceptInviteRecord } = await import('../lib/operationsApi');
+    await acceptInviteRecord(invite.id);
     const profile = await refreshUserProfile();
     if (!profile) throw new Error('Could not refresh joined profile.');
     return profile;
-  }, [refreshUserProfile, user, userProfile]);
+  }, [refreshUserProfile, user]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

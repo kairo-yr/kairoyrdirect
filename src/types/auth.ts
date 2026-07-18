@@ -5,7 +5,7 @@ export type Role = 'super_admin' | 'academy_admin' | 'coach' | 'parent' | 'stude
 export type UserStatus = 'active' | 'pending' | 'disabled';
 export type AcademyStatus = 'pending' | 'active' | 'rejected' | 'disabled' | 'archived';
 export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
-export type InvitableRole = 'coach' | 'student';
+export type InvitableRole = 'student';
 
 export type AuthUser = User;
 
@@ -18,7 +18,7 @@ export interface UserProfile {
   app_role: Role;
   created_at: unknown;
   updated_at: unknown;
-  // Legacy aliases kept until Firestore-backed academy data is migrated.
+  // UI-facing aliases mapped from the canonical Supabase profile.
   uid: string;
   name: string;
   email: string;
@@ -70,18 +70,6 @@ export interface AcademyInvite {
   acceptedAt: unknown;
 }
 
-export interface AcademyCoachProfile {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  status: 'invited' | 'active' | 'disabled';
-  userUid: string | null;
-  inviteId: string;
-  createdAt: unknown;
-  updatedAt: unknown;
-}
-
 export interface AcademyStudentProfile {
   id: string;
   name: string;
@@ -97,7 +85,6 @@ export interface AcademyStudentProfile {
   batchId?: string | null;
   status: 'invited' | 'active' | 'disabled';
   userUid: string | null;
-  inviteId: string;
   createdAt: unknown;
   updatedAt: unknown;
 }

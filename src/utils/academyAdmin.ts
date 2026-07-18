@@ -1,5 +1,4 @@
-import { collection, doc, serverTimestamp, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { createInviteRecord, revokeInviteRecord } from '../lib/operationsApi';
 import type { InvitableRole, UserProfile } from '../types/auth';
 import { createAuditLog } from './superAdminActions';
 
@@ -18,22 +17,9 @@ export async function createAcademyInvite(input: {
   linkedProfileId: string;
   createdByUid: string;
 }) {
-  const inviteRef = doc(collection(db, 'academyInvites'));
   const inviteToken = makeInviteToken();
-  await setDoc(inviteRef, {
-    academyId: input.academyId,
-    role: input.role,
-    email: input.email.toLowerCase(),
-    linkedProfileId: input.linkedProfileId,
-    inviteToken,
-    status: 'pending',
-    createdByUid: input.createdByUid,
-    createdAt: serverTimestamp(),
-    expiresAt: Timestamp.fromDate(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)),
-    acceptedByUid: null,
-    acceptedAt: null,
-  });
-  return { inviteId: inviteRef.id, inviteToken };
+  const invite = await createInviteRecord({ ...input, inviteToken });
+  return { inviteId: String(invite.id), inviteToken };
 }
 
 export async function revokeAcademyInvite(input: {
@@ -41,7 +27,7 @@ export async function revokeAcademyInvite(input: {
   inviteId: string;
   actor: UserProfile;
 }) {
-  await updateDoc(doc(db, 'academyInvites', input.inviteId), { status: 'revoked' });
+  await revokeInviteRecord(input.inviteId);
   await createAuditLog({
     actor: input.actor,
     action: 'academy.invite.revoked',
