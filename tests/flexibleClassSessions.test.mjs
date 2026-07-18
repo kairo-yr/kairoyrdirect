@@ -18,8 +18,8 @@ test('slot architecture is removed from the application without destructive data
 });
 
 test('batch and date identify one simple class session', () => {
-  assert.match(migration, /class_sessions_batch_date_uidx/);
-  assert.match(migration, /academy_id, primary_batch_id, session_date/);
+  assert.match(migration, /class_sessions_batch_date_time_uidx/);
+  assert.match(migration, /academy_id, primary_batch_id, session_date, start_time/);
   assert.match(migration, /find_or_create_batch_class_session/);
   assert.match(api, /rpc\('find_or_create_batch_class_session'/);
 });
@@ -59,6 +59,14 @@ test('attendance UI supports search, reasons, removal, and responsive rows', () 
   assert.match(attendance, /removeStudentFromSession/);
   assert.match(attendance, /lg:grid-cols-\[minmax/);
   assert.doesNotMatch(attendance, /<table/);
+});
+
+test('session query disambiguates the participant foreign key and logs Supabase diagnostics', () => {
+  assert.match(api, /session_participants!session_participants_session_id_fkey/);
+  assert.match(api, /code: technical\?\.code/);
+  assert.match(api, /details: technical\?\.details/);
+  assert.match(api, /hint: technical\?\.hint/);
+  assert.match(attendance, /loadError \? <EmptyState title="Could not load class sessions"/);
 });
 
 test('draft reports reconcile session participants while preserving saved notes', () => {

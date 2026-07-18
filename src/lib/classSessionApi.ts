@@ -29,7 +29,7 @@ export type SessionStudentSearchResult = {
   home_batch_id: string | null; home_batch_name: string | null;
 };
 
-const sessionSelect = `*,coach:coaches(id,full_name),session_source_batches(*,batch:batches(id,name,schedule_label)),session_participants(*,student:students(id,full_name,home_batch_id,parent_name,parent_phone,home_batch:batches!students_home_batch_id_fkey(id,name)),source_batch:batches!session_participants_source_batch_id_fkey(id,name))`;
+const sessionSelect = `*,coach:coaches(id,full_name),session_source_batches(*,batch:batches(id,name,schedule_label)),session_participants!session_participants_session_id_fkey(*,student:students(id,full_name,home_batch_id,parent_name,parent_phone,home_batch:batches!students_home_batch_id_fkey(id,name)),source_batch:batches!session_participants_source_batch_id_fkey(id,name))`;
 
 function friendlyError(error: { message?: string; code?: string } | null, fallback: string) {
   const message = error?.message ?? '';
@@ -44,7 +44,15 @@ function friendlyError(error: { message?: string; code?: string } | null, fallba
   if (match) return new Error(match);
   if (error?.code === '42501') return new Error('Permission denied.');
   if (error?.code === '23505') return new Error('This student or batch is already included.');
-  if (import.meta.env.DEV) console.error(fallback, error);
+  if (import.meta.env.DEV) {
+    const technical = error as { code?: string; message?: string; details?: string; hint?: string } | null;
+    console.error(fallback, {
+      code: technical?.code,
+      message: technical?.message,
+      details: technical?.details,
+      hint: technical?.hint,
+    });
+  }
   return new Error(fallback);
 }
 
@@ -63,8 +71,13 @@ export async function getClassSession(id: string) {
   return data as unknown as ClassSession;
 }
 
-export async function findOrCreateBatchSession(batchId: string, date: string) {
-  const { data, error } = await supabase.rpc('find_or_create_batch_class_session', { target_batch: batchId, target_date: date });
+export async function findOrCreateBatchSession(batchId: string, date: string, startTime: string, endTime: string) {
+  const { data, error } = await supabase.rpc('find_or_create_batch_class_session', {
+    target_batch: batchId,
+    target_date: date,
+    target_start_time: startTime,
+    target_end_time: endTime,
+  });
   if (error) throw friendlyError(error, 'Could not open attendance for this class.');
   return getClassSession(data as string);
 }

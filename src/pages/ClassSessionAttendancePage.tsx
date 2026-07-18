@@ -46,6 +46,7 @@ const statuses: Array<{ value: ParticipantStatus; label: string }> = [
 ];
 
 function today() { return new Date().toISOString().slice(0, 10); }
+function timeLabel(value: string) { return new Date(`2000-01-01T${value}`).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }); }
 function participantBadge(participant: SessionParticipant) {
   const labels: Record<string, string> = {
     makeup: 'Makeup', compensation: 'Makeup', extra_class: 'Extra', temporary: 'Temporary',
@@ -69,6 +70,8 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [selectedDate, setSelectedDate] = useState(today());
+  const [selectedStartTime, setSelectedStartTime] = useState('17:00');
+  const [selectedEndTime, setSelectedEndTime] = useState('18:00');
   const [openClass, setOpenClass] = useState(false);
   const [addStudentOpen, setAddStudentOpen] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
@@ -77,6 +80,7 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
   const [reason, setReason] = useState('makeup');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
   const [message, setMessage] = useState('');
@@ -99,6 +103,7 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
     if (!academyId || (isCoach && !coach?.id)) return;
     setLoading(true);
     setError('');
+    setLoadError('');
     try {
       const [workspace, loadedSessions] = await Promise.all([
         isCoach && coach ? getCoachWorkspace(coach.id, academyId) : getAcademyWorkspace(academyId),
@@ -110,7 +115,9 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
       const requested = searchParams.get('sessionId');
       if (requested) hydrateSession(await getClassSession(requested));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not load attendance.');
+      const message = caught instanceof Error ? caught.message : 'Could not load class sessions.';
+      setLoadError(message);
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -131,11 +138,12 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
   const canEdit = Boolean(session && session.status !== 'completed' && session.status !== 'cancelled');
 
   const openSelectedClass = async () => {
-    if (!selectedBatchId || !selectedDate) return setError('Choose a batch and class date.');
+    if (!selectedBatchId || !selectedDate || !selectedStartTime || !selectedEndTime) return setError('Choose a batch, class date, start time, and end time.');
+    if (selectedEndTime <= selectedStartTime) return setError('End time must be later than start time.');
     setSaving(true);
     setError('');
     try {
-      const next = await findOrCreateBatchSession(selectedBatchId, selectedDate);
+      const next = await findOrCreateBatchSession(selectedBatchId, selectedDate, selectedStartTime, selectedEndTime);
       hydrateSession(next);
       setOpenClass(false);
       setSessions(await listClassSessions(academyId!));
@@ -183,11 +191,11 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
 
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        {!session ? <EmptyState title="Open a batch class to mark attendance" description="Choose a batch and date. Its active students will be loaded automatically." /> : <>
+        {loadError ? <EmptyState title="Could not load class sessions" description={loadError} /> : !session ? <EmptyState title="Open a batch class to mark attendance" description="Choose a batch and date. Its active students will be loaded automatically." /> : <>
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-xl font-black text-navy">{session.session_source_batches?.[0]?.batch?.name ?? 'Class attendance'}</h2>
-              <p className="mt-1 text-sm font-semibold text-slate-500">{formatDateOnly(session.session_date)} · {session.session_source_batches?.[0]?.batch?.schedule_label || 'Batch schedule'}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-500">{formatDateOnly(session.session_date)} · {timeLabel(session.start_time)}–{timeLabel(session.end_time)} · {session.session_source_batches?.[0]?.batch?.schedule_label || 'Batch schedule'}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Badge className={session.status === 'completed' ? 'bg-emerald-50 text-emerald-700 ring-emerald-100' : 'bg-blue-50 text-blue-700 ring-blue-100'}>{session.status}</Badge>
@@ -222,16 +230,16 @@ export function ClassSessionAttendancePage({ mode }: { mode: Mode }) {
 
       <aside className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-6 xl:self-start">
         <h3 className="font-black text-navy">Class history</h3>
-        <div className="mt-3 max-h-[70vh] space-y-2 overflow-y-auto">{sessions.length ? sessions.map((item) => <button className={`w-full rounded-2xl border p-3 text-left ${session?.id === item.id ? 'border-blue-300 bg-blue-50' : 'border-slate-100 hover:bg-slate-50'}`} key={item.id} onClick={() => void reloadSession(item.id)}>
+        <div className="mt-3 max-h-[70vh] space-y-2 overflow-y-auto">{loadError ? <p className="text-sm font-semibold text-rose-600">Could not load class sessions.</p> : sessions.length ? sessions.map((item) => <button className={`w-full rounded-2xl border p-3 text-left ${session?.id === item.id ? 'border-blue-300 bg-blue-50' : 'border-slate-100 hover:bg-slate-50'}`} key={item.id} onClick={() => void reloadSession(item.id)}>
           <div className="flex items-center justify-between gap-2"><span className="text-sm font-black text-navy">{item.session_source_batches?.[0]?.batch?.name ?? 'Historical class'}</span><Badge className="bg-slate-100 text-slate-700 ring-slate-200">{item.status}</Badge></div>
-          <p className="mt-1 text-xs font-semibold text-slate-500">{formatDateOnly(item.session_date)} · {item.session_source_batches?.[0]?.batch?.schedule_label || 'Schedule unavailable'}</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">{formatDateOnly(item.session_date)} · {timeLabel(item.start_time)}–{timeLabel(item.end_time)}</p>
           <p className="mt-1 text-xs text-slate-500">{item.session_participants?.length ?? 0} students · {(item.session_participants ?? []).filter((p) => !isScheduled(p)).length} added</p>
         </button>) : <p className="text-sm text-slate-500">No class sessions yet.</p>}</div>
       </aside>
     </div>
 
     <Modal open={openClass} title="Open class attendance" description="Scheduled students come from the selected batch." onClose={() => setOpenClass(false)}>
-      <div className="grid gap-4"><FormSelect label="Batch" value={selectedBatchId} onChange={(event) => setSelectedBatchId(event.target.value)} options={[{ value: '', label: batches.length ? 'Choose a batch' : 'No assigned batches' }, ...batches.map((batch) => ({ value: batch.id, label: `${batch.name} · ${batch.coachName}` }))]}/><FormInput label="Class date" type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)}/><button disabled={saving || !selectedBatchId} className="rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white disabled:opacity-50" onClick={() => void openSelectedClass()}><CalendarCheck className="mr-2 inline" size={17}/>Open attendance</button></div>
+      <div className="grid gap-4 sm:grid-cols-2"><FormSelect className="sm:col-span-2" label="Batch" value={selectedBatchId} onChange={(event) => setSelectedBatchId(event.target.value)} options={[{ value: '', label: batches.length ? 'Choose a batch' : 'No assigned batches' }, ...batches.map((batch) => ({ value: batch.id, label: `${batch.name} · ${batch.coachName}` }))]}/><FormInput className="sm:col-span-2" label="Class date" type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)}/><FormInput label="Start time" type="time" value={selectedStartTime} onChange={(event) => setSelectedStartTime(event.target.value)}/><FormInput label="End time" type="time" value={selectedEndTime} onChange={(event) => setSelectedEndTime(event.target.value)}/><button disabled={saving || !selectedBatchId} className="rounded-xl bg-directBlue px-4 py-3 text-sm font-black text-white disabled:opacity-50 sm:col-span-2" onClick={() => void openSelectedClass()}><CalendarCheck className="mr-2 inline" size={17}/>Open attendance</button></div>
     </Modal>
 
     <Modal open={addStudentOpen} title="Add student" description="Adds an active academy student to this attendance session only." onClose={() => setAddStudentOpen(false)}>

@@ -16,8 +16,8 @@ set primary_batch_id = (
 where cs.primary_batch_id is null
   and exists(select 1 from public.session_source_batches ssb where ssb.session_id=cs.id);
 
-create unique index if not exists class_sessions_batch_date_uidx
-  on public.class_sessions(academy_id, primary_batch_id, session_date)
+create unique index if not exists class_sessions_batch_date_time_uidx
+  on public.class_sessions(academy_id, primary_batch_id, session_date, start_time)
   where primary_batch_id is not null and class_slot_id is null;
 
 alter table public.session_participants drop constraint if exists session_participants_source_type_check;
@@ -27,7 +27,7 @@ alter table public.session_participants add constraint session_participants_sour
     'individual_schedule','compensation','rescheduled','temporary_transfer','manual_other'
   ));
 
-create or replace function public.find_or_create_batch_class_session(target_batch uuid, target_date date)
+create or replace function public.find_or_create_batch_class_session(target_batch uuid, target_date date, target_start_time time, target_end_time time)
 returns uuid language plpgsql security definer set search_path='' as $$
 declare selected_batch public.batches%rowtype; session_id uuid;
 begin
@@ -36,10 +36,13 @@ begin
   if not (public.is_super_admin() or public.has_academy_role(selected_batch.academy_id,'academy_admin') or public.is_assigned_coach(selected_batch.academy_id,selected_batch.id)) then
     raise exception 'Permission denied.';
   end if;
+  if target_start_time is null or target_end_time is null or target_end_time<=target_start_time then
+    raise exception 'Choose a valid class start and end time.';
+  end if;
 
   insert into public.class_sessions(academy_id,primary_batch_id,coach_id,session_date,start_time,end_time,location,status,created_by)
-  values(selected_batch.academy_id,selected_batch.id,selected_batch.primary_coach_id,target_date,'00:00','00:01',selected_batch.location,'open',auth.uid())
-  on conflict(academy_id,primary_batch_id,session_date) where primary_batch_id is not null and class_slot_id is null
+  values(selected_batch.academy_id,selected_batch.id,selected_batch.primary_coach_id,target_date,target_start_time,target_end_time,selected_batch.location,'open',auth.uid())
+  on conflict(academy_id,primary_batch_id,session_date,start_time) where primary_batch_id is not null and class_slot_id is null
   do update set updated_at=public.class_sessions.updated_at
   returning id into session_id;
 
@@ -124,5 +127,5 @@ begin
   return inserted_count;
 end $$;
 
-revoke all on function public.find_or_create_batch_class_session(uuid,date) from public,anon;
-grant execute on function public.find_or_create_batch_class_session(uuid,date) to authenticated;
+revoke all on function public.find_or_create_batch_class_session(uuid,date,time,time) from public,anon;
+grant execute on function public.find_or_create_batch_class_session(uuid,date,time,time) to authenticated;
